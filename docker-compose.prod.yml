@@ -67,6 +67,8 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-puppeteer:latest
     container_name: arl-puppeteer-prod
     restart: always
+    init: true
+    shm_size: '512m'
     mem_reservation: 256m
     oom_score_adj: 300
     command: bash -c "export NODE_PATH=/usr/local/lib/node_modules && node /code/backend/app/tools/puppeteer_server.js"
@@ -83,8 +85,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest
     container_name: arl-worker-prod
     restart: always
+    init: true
     mem_reservation: 512m
-    oom_score_adj: 500
+    oom_score_adj: 0
     stop_grace_period: 1m
     command: bash -c "/code/backend/start_worker_prod.sh"
     working_dir: /code
@@ -124,7 +127,7 @@ services:
     restart: always
     mem_reservation: 512m
     oom_score_adj: -500
-    command: ["--wiredTigerCacheSizeGB", "1"]
+    command: ["--wiredTigerCacheSizeGB", "0.5"]
     environment:
       - MONGO_INITDB_DATABASE=arl
       - MONGO_INITDB_ROOT_USERNAME=admin

@@ -60,3 +60,4 @@ frontend/.htpasswd
 mcp-server/node_modules/
 mcp-server/.env
 Notify.txt
+*.bak*
