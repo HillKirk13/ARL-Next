@@ -41,6 +41,7 @@ services:
     command: bash -c "/code/backend/start_web_prod.sh"
     working_dir: /code
     volumes:
+      - ./backend/app/services/portScan.py:/code/backend/app/services/portScan.py
       - arl_screenshots:/code/backend/app/tmp_screenshot
       - arl_app_dicts:/code/backend/app/dicts
       - arl_poc_plugins:/code/backend/ARL-NPoC/xing/plugins
@@ -70,14 +71,16 @@ services:
     init: true
     shm_size: '512m'
     mem_reservation: 256m
+    mem_limit: 768m
     oom_score_adj: 300
     command: bash -c "export NODE_PATH=/usr/local/lib/node_modules && node /code/backend/app/tools/puppeteer_server.js"
     working_dir: /code
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      - ./backend/app/tools/puppeteer_server.js:/code/backend/app/tools/puppeteer_server.js
     networks:
       - arl-net
-
 
   # 后台扫描任务 Worker
   arl-worker:
@@ -87,7 +90,11 @@ services:
     restart: always
     init: true
     mem_reservation: 512m
+    mem_limit: 1536m
     oom_score_adj: 0
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
     stop_grace_period: 1m
     command: bash -c "/code/backend/start_worker_prod.sh"
     working_dir: /code

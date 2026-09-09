@@ -25,7 +25,7 @@ class PortScan:
         # -sT: TCP 连接扫描 (不需要 root 权限，且更准)
         # -n: 不做反向 DNS 解析 (极大提升速度)
         # --open: 只输出 open 状态的端口
-        self.nmap_arguments = "-sT -n --open"
+        self.nmap_arguments = "-sS -n --open"
         self.max_retries = 3
         self.host_timeout = 60*5
         self.parallelism = port_parallelism  # 默认 32，控制并发探针数
@@ -36,7 +36,7 @@ class PortScan:
         # 依据用户是否开启了 服务识别 (-sV) 或 OS识别 (-O)，动态增加超时时间。
         if service_detect:
             self.host_timeout += 60 * 5
-            self.nmap_arguments += " -sV"
+            self.nmap_arguments += " -sV --version-intensity 2"
 
         if os_detect:
             self.host_timeout += 60 * 4
@@ -56,12 +56,13 @@ class PortScan:
         # 全端口(1-65535)扫描是极度危险且耗时的操作，必须采用极端的调优参数
         if self.ports == "1-65535":
             self.max_host_group = 2             # 减小并发组，防止把路由器连接数打满
-            self.min_rate = max(self.min_rate, 800) # 强制提高发包下限速率
+            self.min_rate = max(self.min_rate, 1000) # 强制提高发包下限速率
             self.parallelism = max(self.parallelism, 128)
 
             self.nmap_arguments += " -PE -PS{}".format(self.alive_port)
-            self.host_timeout += 60 * 5
-            self.max_retries = 2
+            self.nmap_arguments += " --defeat-rst-ratelimit"
+            self.host_timeout = 60 * 3
+            self.max_retries = 1
 
         # 极限性能微调参数
         self.nmap_arguments += " --max-rtt-timeout 800ms" # 如果包 800ms 还没回，就不等了
@@ -100,7 +101,7 @@ class PortScan:
                     # 黑客防御界有一种东西叫“全端口蜜罐”（你扫它任何端口都是 open 的，目的是拖死你的扫描器或投毒）。
                     # 这里的逻辑极其粗暴但有效：如果发现这个 IP 竟然开放了 >600 个端口，
                     # 并且当前处理的端口不是 80 或 443（Web刚需端口），直接抛弃！
-                    if port_len > 600 and (port not in [80, 443]):
+                    if port_len > 150 and (port not in [80, 443]):
                         continue
 
                     port_info = nm[host][proto][port]

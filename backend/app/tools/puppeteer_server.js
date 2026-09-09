@@ -40,7 +40,7 @@ function analyzeUrl(url) {
         timeoutId = setTimeout(() => {
             console.log(`[Timeout] 32s limit reached for ${url}`);
             cleanupAndResolve([]);
-        }, 32000);
+        }, 15000);
         try {
             // Create a new incognito context for isolation
             context = await browser.createIncognitoBrowserContext();
@@ -198,7 +198,7 @@ async function takeScreenshot(url) {
 
             await page.setViewport({ width: 1024, height: 768 });
 
-            const gotoPromise = page.goto(url, { waitUntil: 'load', timeout: 15000 });
+            const gotoPromise = page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
             gotoPromise.catch(() => {});
             
             let gotoTimeoutId;
@@ -282,7 +282,7 @@ async function takeScreenshot(url) {
 
 let requestsCount = 0;
 let isRestartingBrowser = false;
-const MAX_REQUESTS = 300; // Self-heal to prevent memory leaks
+const MAX_REQUESTS = 50; // Self-heal to prevent memory leaks
 
 async function checkShutdown() {
     if (requestsCount >= MAX_REQUESTS && !isRestartingBrowser) {
