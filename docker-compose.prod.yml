@@ -41,7 +41,8 @@ services:
     command: bash -c "/code/backend/start_web_prod.sh"
     working_dir: /code
     volumes:
-      - ./backend/app/services/portScan.py:/code/backend/app/services/portScan.py
+      - ./backend/app/routes/dictionary.py:/code/backend/app/routes/dictionary.py
+      - ./backend/app/routes/brute_dict.py:/code/backend/app/routes/brute_dict.py
       - arl_screenshots:/code/backend/app/tmp_screenshot
       - arl_app_dicts:/code/backend/app/dicts
       - arl_poc_plugins:/code/backend/ARL-NPoC/xing/plugins

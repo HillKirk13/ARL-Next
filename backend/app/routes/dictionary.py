@@ -1,3 +1,6 @@
+import uuid
+import threading
+from flask import request
 import os
 from flask_restx import Resource, Namespace, fields
 from app.utils import get_logger, auth
@@ -282,3 +285,128 @@ class DictionaryAppend(Resource):
         except Exception as e:
             logger.error(f"Error appending to dictionary {name}: {e}")
             return {'code': 500, 'message': str(e)}
+
+
+# 全局大文件上传任务进度跟踪
+upload_status_map = {}
+
+def process_large_dict_async(task_id, file_path_tmp, target_path):
+    try:
+        inserted = 0
+        ignored = 0
+        existing_set = set()
+
+        if os.path.exists(target_path):
+            with open(target_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped:
+                        existing_set.add(stripped)
+
+        to_write = []
+        with open(file_path_tmp, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped not in existing_set:
+                    existing_set.add(stripped)
+                    to_write.append(stripped)
+                    inserted += 1
+                else:
+                    ignored += 1
+
+        if to_write:
+            mode = 'a' if os.path.exists(target_path) and os.path.getsize(target_path) > 0 else 'w'
+            with open(target_path, mode, encoding='utf-8') as f:
+                for item in to_write:
+                    f.write(f"{item}\n")
+
+        if os.path.exists(file_path_tmp):
+            os.remove(file_path_tmp)
+
+        upload_status_map[task_id] = {
+            'status': 'completed',
+            'inserted_lines': inserted,
+            'ignored_lines': ignored,
+            'message': 'success'
+        }
+    except Exception as e:
+        logger.exception(f"Error processing large dict for task {task_id}: {e}")
+        upload_status_map[task_id] = {
+            'status': 'error',
+            'inserted_lines': 0,
+            'ignored_lines': 0,
+            'message': str(e)
+        }
+        if os.path.exists(file_path_tmp):
+            try:
+                os.remove(file_path_tmp)
+            except Exception:
+                pass
+
+
+@ns.route('/upload_large')
+class DictionaryUploadLarge(Resource):
+    @auth
+    def post(self):
+        """
+        大文件字典异步上传接口 (支持数十万行超大字典，后台去重导入)
+        """
+        file_obj = request.files.get('file')
+        name = request.form.get('name') or request.args.get('name')
+
+        if not file_obj or not name:
+            return {'code': 400, 'message': '缺少文件或文件名'}
+
+        name = os.path.basename(name.strip())
+        if not name.endswith('.txt') or '..' in name or '/' in name or '\\' in name:
+            return {'code': 400, 'message': '文件名不合法，必须以 .txt 结尾'}
+
+        target_path = os.path.join(DICT_DIR, name)
+        task_id = str(uuid.uuid4())
+
+        tmp_dir = os.path.join(DICT_DIR, 'tmp')
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_path = os.path.join(tmp_dir, f"upload_{task_id}.tmp")
+
+        try:
+            file_obj.save(tmp_path)
+        except Exception as e:
+            return {'code': 500, 'message': f'保存临时文件失败: {e}'}
+
+        upload_status_map[task_id] = {
+            'status': 'processing',
+            'inserted_lines': 0,
+            'ignored_lines': 0,
+            'message': 'processing'
+        }
+
+        t = threading.Thread(target=process_large_dict_async, args=(task_id, tmp_path, target_path))
+        t.daemon = True
+        t.start()
+
+        return {
+            'code': 200,
+            'message': 'success',
+            'task_id': task_id
+        }
+
+
+@ns.route('/upload_status')
+class DictionaryUploadStatus(Resource):
+    @auth
+    def get(self):
+        """
+        查询大文件字典导入进度
+        """
+        task_id = request.args.get('task_id')
+        if not task_id or task_id not in upload_status_map:
+            return {'code': 404, 'message': '任务不存在或已过期'}
+
+        data = upload_status_map[task_id]
+        return {
+            'code': 200,
+            'message': 'success',
+            'data': data
+        }
