@@ -287,10 +287,9 @@ def cleanup_zombie_tasks():
         task_id = str(task["_id"])
         logger.info(f"Cleanup zombie task: {task_id}, status: {task.get('status')}")
         
-        # 清理残余数据
-        utils.clean_task_data(task_id)
-        
         if task.get("task_tag") == "monitor":
+            # 监控任务记录将被删除，先清理其残余数据（下次调度会重新生成）
+            utils.clean_task_data(task_id)
             # 对于监控任务，删除残余记录
             conn('task').delete_one({"_id": task["_id"]})
             

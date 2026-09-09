@@ -574,37 +574,38 @@ class GenURL():
 from typing import  List
 
 def file_leak(targets, dicts, gen_dict = True) -> List[Page]:
-    all_gen_url = set()
-    map_url = dict()
-
-    for site in targets:
-        site = normal_url(site.strip())
-        if not site:
-            continue
-
-        map_url[URL(site, "").scope] = set()
-        a = GenURL(site, dicts)
-        all_gen_url |= a.gen(gen_dict)
-
-    for url in all_gen_url:
-        map_url[url.scope].add(url)
-
-    cnt = 0
-    total = len(map_url)
     ret = []
-    for target in map_url:
-        cnt += 1
+    batch_size = 20
 
-        try:
-            f = FileLeak(target, map_url[target], concurrency_count)
-            pages = f.run()
-            for page in pages:
-                logger.info("found => {}".format(page))
+    # 分批展开 URL，避免 站点数×字典量 的 URL 对象一次性驻留内存
+    for i in range(0, len(targets), batch_size):
+        all_gen_url = set()
+        map_url = dict()
 
-            ret.extend(pages)
-        except Exception as e:
-            logger.info("error on {}, {}".format(target, e))
-            logger.exception(e)
+        for site in targets[i:i + batch_size]:
+            site = normal_url(site.strip())
+            if not site:
+                continue
+
+            map_url[URL(site, "").scope] = set()
+            a = GenURL(site, dicts)
+            all_gen_url |= a.gen(gen_dict)
+
+        for url in all_gen_url:
+            map_url[url.scope].add(url)
+
+        for target in map_url:
+
+            try:
+                f = FileLeak(target, map_url[target], concurrency_count)
+                pages = f.run()
+                for page in pages:
+                    logger.info("found => {}".format(page))
+
+                ret.extend(pages)
+            except Exception as e:
+                logger.info("error on {}, {}".format(target, e))
+                logger.exception(e)
 
     return ret
 
