@@ -108,13 +108,55 @@
           </template>
         </a-input>
       </div>
+
+      <!-- 如果不是 site Tab，在搜索栏末尾展示时间筛选 -->
+      <div v-if="activeTab !== 'site'" class="search-item" style="display: inline-flex; align-items: center;">
+        <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
+        <a-range-picker
+            v-model:value="dateRange"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始时间', '结束时间']"
+            style="width: 330px;"
+            allowClear
+            @change="onDateRangeChange"
+        />
+        <a-button-group style="margin-left: 8px;">
+          <a-button :type="quickDay === 1 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(1)">1天</a-button>
+          <a-button :type="quickDay === 3 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(3)">3天</a-button>
+          <a-button :type="quickDay === 5 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(5)">5天</a-button>
+          <a-button :type="quickDay === 7 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(7)">7天</a-button>
+        </a-button-group>
+      </div>
     </div>
 
-    <div v-show="activeTab !== 'syslog'" style="margin-bottom: 16px;">
+    <div v-show="activeTab !== 'syslog'" style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap;">
       <a-button :disabled="!hasSelected" style="margin-right: 16px;" @click="handleBatchDelete">批量删除</a-button>
       <a-button style="margin-right: 16px;" @click="resetSearch">清 除</a-button>
       <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="margin-right: 16px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
-      <a-button v-if="activeTab === 'site'" type="primary" @click="openRiskModal">风险任务下发</a-button>
+      <a-button v-if="activeTab === 'site'" type="primary" style="margin-right: 16px;" @click="openRiskModal">风险任务下发</a-button>
+
+      <!-- 如果是 site Tab，在风险任务下发右侧展示时间筛选 -->
+      <div v-if="activeTab === 'site'" class="search-item" style="display: inline-flex; align-items: center;">
+        <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
+        <a-range-picker
+            v-model:value="dateRange"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始时间', '结束时间']"
+            style="width: 330px;"
+            allowClear
+            @change="onDateRangeChange"
+        />
+        <a-button-group style="margin-left: 8px;">
+          <a-button :type="quickDay === 1 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(1)">1天</a-button>
+          <a-button :type="quickDay === 3 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(3)">3天</a-button>
+          <a-button :type="quickDay === 5 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(5)">5天</a-button>
+          <a-button :type="quickDay === 7 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(7)">7天</a-button>
+        </a-button-group>
+      </div>
     </div>
 
     <a-table
@@ -648,6 +690,37 @@ const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
 
 const searchForm = ref({});
+const dateRange = ref(null);
+const quickDay = ref(null);
+
+const formatDateTime = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+};
+
+const handleQuickClick = (days) => {
+  if (quickDay.value === days) {
+    quickDay.value = null;
+    dateRange.value = null;
+  } else {
+    quickDay.value = days;
+    const now = new Date();
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    dateRange.value = [formatDateTime(start), formatDateTime(now)];
+  }
+  onSearch();
+};
+
+const onDateRangeChange = () => {
+  quickDay.value = null;
+  onSearch();
+};
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
 
 // 💥 核心修改 3：在配置字典中加入 deleteUrl
@@ -1008,6 +1081,10 @@ const fetchData = async (isPolling = false) => {
     if (taskId) {
       params.task_id = taskId;
     }
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
+      params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
+      params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
+    }
 
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
@@ -1068,6 +1145,10 @@ const handleExport = async () => {
 
     const params = { page: 1, size: 100000 };
     if (query.task_id) params.task_id = query.task_id;
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
+      params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
+      params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
+    }
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
         let paramKey = key;
@@ -1161,6 +1242,8 @@ const onSearch = () => {
 
 const resetSearch = () => {
   searchForm.value = {};
+  dateRange.value = null;
+  quickDay.value = null;
   onSearch();
 };
 
@@ -1241,6 +1324,8 @@ watch(activeTab, (newVal) => {
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
     searchForm.value = {};
+    dateRange.value = null;
+    quickDay.value = null;
     pagination.current = 1;
     if (newVal === 'syslog') {
       pagination.pageSize = 500;

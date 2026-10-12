@@ -166,7 +166,7 @@ def update_nginx_auth_config(content: str, enable: bool) -> str:
         server_scope = content
         rest_scope = ""
 
-    new_auth_val = 'auth_basic "Restricted Access - AntiScan";' if enable else 'auth_basic off;'
+    new_auth_val = 'auth_basic $auth_basic_status;' if enable else 'auth_basic off;'
     
     if re.search(r'^\s*auth_basic\s+[^;]+;', server_scope, re.MULTILINE):
         server_scope = re.sub(

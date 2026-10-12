@@ -25,6 +25,7 @@ services:
       - ./ssl-certs:/certs:ro
       - ./frontend/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./frontend/default.conf.prod:/etc/nginx/conf.d/default.conf
+      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       - arl-web
     networks:
@@ -41,6 +42,9 @@ services:
     command: bash -c "/code/backend/start_web_prod.sh"
     working_dir: /code
     volumes:
+      - ./backend/app/utils/user.py:/code/backend/app/utils/user.py
+      - ./backend/app/routes/user.py:/code/backend/app/routes/user.py
+      - ./backend/app/routes/__init__.py:/code/backend/app/routes/__init__.py
       - ./backend/app/routes/dictionary.py:/code/backend/app/routes/dictionary.py
       - ./backend/app/routes/brute_dict.py:/code/backend/app/routes/brute_dict.py
       - arl_screenshots:/code/backend/app/tmp_screenshot

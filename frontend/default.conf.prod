@@ -1,3 +1,9 @@
+# 如果请求携带了 arl_token cookie (说明已经登录)，跳过 Basic Auth 弹窗；未登录访客保留防扫描拦截
+map $cookie_arl_token $auth_basic_status {
+    default "Restricted Access - AntiScan";
+    ~.+     "off";
+}
+
 server {
     listen       5173 ssl;
     http2        on;
@@ -6,8 +12,8 @@ server {
     # 允许上传最大 100MB 的超大字典与 PoC 插件
     client_max_body_size 100M;
 
-    # 开启 HTTP Basic Auth 阻挡被动扫描
-    auth_basic "Restricted Access - AntiScan";
+    # 开启 HTTP Basic Auth 阻挡被动扫描 (已登录用户免弹窗)
+    auth_basic $auth_basic_status;
     auth_basic_user_file /etc/nginx/.htpasswd;
 
     ssl_certificate      /certs/arl.crt;

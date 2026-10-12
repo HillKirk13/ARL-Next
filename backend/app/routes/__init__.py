@@ -1,4 +1,5 @@
 import re
+import struct
 from flask_restx import Resource, reqparse, fields
 from bson.objectid import ObjectId
 from datetime import datetime
@@ -6,13 +7,16 @@ from urllib.parse import quote
 from flask import make_response
 import time
 
-from app.utils import conn_db as conn
+from app.utils import conn_db as conn, get_logger
+logger = get_logger()
 
 # 定义通用的api契约
 base_query_fields = {
     'page': fields.Integer(description="当前页数", example=1),
     'size': fields.Integer(description="页面大小", example=10),
     'order': fields.String(description="排序字段", example='_id'),
+    'update_date__dgt': fields.String(description="更新时间大于"),
+    'update_date__dlt': fields.String(description="更新时间小于"),
 }
 
 # 只能用等号进行mongo查询的字段
@@ -27,7 +31,7 @@ class ARLResource(Resource):
     # 字段查询映射配置，子类可覆盖以实现特定字段的转换
     query_field_map = {
         "finger": "finger.name",
-        "record_type": "recordType"
+        "vul_category": "plg_type"
     }
 
     def get_parser(self, model, location='json'):
@@ -89,7 +93,7 @@ class ARLResource(Resource):
 
         for key in args: # 遍历前端传来的每一个参数名
             # 1.忽略基础分页字段(page,size,order 不需要放进数据库查询条件里)
-            if key in base_query_fields:
+            if key in ('page', 'size', 'order'):
                 continue
 
             # 2. 特殊处理 MongoDB 的主键 _id:必须把字符串转换成专属的 ObjectID 类型
@@ -103,30 +107,108 @@ class ARLResource(Resource):
                 continue
 
 
-            # 3. 忽略空值（前端传了字段但没给值的，不管它）
-            if args[key] is None:
+            # 3. 忽略空值（前端传了字段但没给值的，或者空字符串，不管它）
+            if args[key] is None or args[key] == '':
                 continue
 
             # 4. 核心魔法：识别后缀并翻译成 MongoDB 指令
+            # __gte 代表 greater than or equal (大于等于)
+            if key.endswith("__gte"):
+                real_key = key.split('__gte')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                raw_value.update({"$gte": args[key]})
+                query_args[actual_key] = raw_value
+
+            # __lte 代表 less than or equal (小于等于)
+            elif key.endswith("__lte"):
+                real_key = key.split('__lte')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                raw_value.update({"$lte": args[key]})
+                query_args[actual_key] = raw_value
+
             # __dgt 代表 datetime greater than (时间大于)
-            if key.endswith("__dgt"):
+            elif key.endswith("__dgt"):
                 real_key = key.split('__dgt')[0]
-                raw_value = query_args.get(real_key, {})
-                raw_value.update({
-                    "$gt": datetime.strptime(args[key],
-                                             "%Y-%m-%d %H:%M:%S")
-                })
-                query_args[real_key] = raw_value
+                if real_key in ('update_date', 'time', 'date'):
+                    try:
+                        dt = datetime.strptime(args[key], "%Y-%m-%d %H:%M:%S")
+                        ts = int(dt.timestamp())
+                        start_oid = ObjectId(struct.pack(">I", ts) + b'\x00' * 8)
+                        cond = {
+                            "$or": [
+                                {"_id": {"$gte": start_oid}},
+                                {"update_date": {"$gte": dt}},
+                                {"update_date": {"$gte": args[key]}},
+                                {"save_date": {"$gte": args[key]}}
+                            ]
+                        }
+                        query_args.setdefault("$and", []).append(cond)
+                    except Exception as e:
+                        try:
+                            logger.warning(f"parse __dgt error: {e}")
+                        except Exception:
+                            pass
+                else:
+                    actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                    raw_value = query_args.get(actual_key, {})
+                    if not isinstance(raw_value, dict):
+                        raw_value = {}
+                    if real_key in ["start_time", "end_time"]:
+                        raw_value.update({"$gte": args[key]})
+                    else:
+                        try:
+                            raw_value.update({
+                                "$gt": datetime.strptime(args[key],
+                                                         "%Y-%m-%d %H:%M:%S")
+                            })
+                        except (ValueError, TypeError):
+                            continue
+                    query_args[actual_key] = raw_value
 
             # __dlt 代表 datetime less than (时间小于)
             elif key.endswith("__dlt"):
                 real_key = key.split('__dlt')[0]
-                raw_value = query_args.get(real_key, {})
-                raw_value.update({
-                    "$lt": datetime.strptime(args[key],
-                                             "%Y-%m-%d %H:%M:%S")
-                })
-                query_args[real_key] = raw_value
+                if real_key in ('update_date', 'time', 'date'):
+                    try:
+                        dt = datetime.strptime(args[key], "%Y-%m-%d %H:%M:%S")
+                        ts = int(dt.timestamp())
+                        end_oid = ObjectId(struct.pack(">I", ts) + b'\xff' * 8)
+                        cond = {
+                            "$or": [
+                                {"_id": {"$lte": end_oid}},
+                                {"update_date": {"$lte": dt}},
+                                {"update_date": {"$lte": args[key]}},
+                                {"save_date": {"$lte": args[key]}}
+                            ]
+                        }
+                        query_args.setdefault("$and", []).append(cond)
+                    except Exception as e:
+                        try:
+                            logger.warning(f"parse __dlt error: {e}")
+                        except Exception:
+                            pass
+                else:
+                    actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                    raw_value = query_args.get(actual_key, {})
+                    if not isinstance(raw_value, dict):
+                        raw_value = {}
+                    if real_key in ["start_time", "end_time"]:
+                        raw_value.update({"$lte": args[key]})
+                    else:
+                        try:
+                            raw_value.update({
+                                "$lt": datetime.strptime(args[key],
+                                                         "%Y-%m-%d %H:%M:%S")
+                            })
+                        except (ValueError, TypeError):
+                            continue
+                    query_args[actual_key] = raw_value
 
             # __ngt 代表 numeric greater than (数字大于)
             elif key.endswith("__ngt"):
@@ -220,6 +302,8 @@ class ARLResource(Resource):
 
         # 第一层循环：遍历查出来的每一条数据（每一行记录）
         for item in data:
+            if "plg_type" in item and "vul_category" not in item:
+                item["vul_category"] = item["plg_type"]
             # 第二层循环：遍历这一条数据里的每一个字段名（比如 name, _id, status）
             for key in item:
                 # 核心操作：把它的值强制转换成普通字符串 (string)
@@ -247,8 +331,25 @@ class ARLResource(Resource):
         size = default_field.get("size", 10)        # 每页多少条数据（默认10条）
         orderby_list = default_field.get('order', [("_id", -1)])    # 按什么排序（默认按 _id 倒序，即最新的排前面）
 
+        # 兼容性兜底: 如果请求的是 asset_* (如 asset_site, asset_fileleak 等)，但未指定 scope_id 且该集合为空，自动使用基础资产集合 (site, fileleak 等)
+        if collection and collection.startswith("asset_") and (not args or not args.get("scope_id")):
+            base_coll = collection.replace("asset_", "", 1)
+            try:
+                if conn(collection).estimated_document_count() == 0 and conn(base_coll).estimated_document_count() > 0:
+                    collection = base_coll
+            except Exception:
+                pass
+
         # 2. 让“翻译官”把剩下的 args 翻译成 MongoDB 查询语句
         query = self.build_db_query(args)
+
+        # 强制拦截过滤: 如果是监控子任务，默认只显示增量 (new/update)
+        if collection and collection.startswith("asset_") and "task_id" in query:
+            task_id = query["task_id"]
+            if isinstance(task_id, str) and len(task_id) == 24:
+                from app.utils.monitor_diff import _get_task_scope_id
+                if _get_task_scope_id(task_id):
+                    query["change_status"] = {"$in": ["new", "update"]}
 
         # 3. 核心数据库操作（连招）：
         # 加入 projection 剔除特别大的无用字段 (如 favicon.data 和 body)
@@ -272,17 +373,20 @@ class ARLResource(Resource):
 
         # 6. 【扫尾工作】：把查询条件 query 里的特殊对象也变成普通字符串
         # 为什么要搞这一步？因为 ARL 习惯把查询条件原封不动地返回给前端，方便调试或展示
-        special_keys = ["_id", "save_date", "update_date", "create_time"]
-        for key in query:
-            if key in special_keys:
-                query[key] = str(query[key])
+        def _clean_query(obj):
+            if isinstance(obj, dict):
+                return {k: _clean_query(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_clean_query(x) for x in obj]
+            elif isinstance(obj, ObjectId):
+                return str(obj)
+            elif isinstance(obj, datetime):
+                return obj.strftime("%Y-%m-%d %H:%M:%S")
+            elif isinstance(obj, type(re.compile(""))):
+                return obj.pattern
+            return obj
 
-            raw_value = query[key]
-            if isinstance(raw_value, dict):
-                if "$not" in raw_value:
-                    # 把编译好的正则表达式对象，还原成普通字符串
-                    if isinstance(raw_value["$not"], type(re.compile(""))):
-                        raw_value["$not"] = raw_value["$not"].pattern
+        query = _clean_query(query)
 
         # 7. 组装“最终包裹”，按照统一标准发给前端
         data = {
@@ -412,7 +516,7 @@ class ARLResource(Resource):
 
                 # 6. 【特殊处理】WIH 信息导出需保留业务上下文
                 elif _type in ("wih", "asset_wih"):
-                    record_type = item.get("recordType", "unknown")
+                    record_type = item.get("record_type") or item.get("recordType", "unknown")
                     site = item.get("site", "unknown_site")
                     content = item.get(filed_name, "")
                     items_set.add(f"{site} [{record_type}] {content}")
@@ -488,11 +592,11 @@ class ARLResource(Resource):
                     items_set.add(curr_ip)
 
         elif _type in ("wih", "asset_wih"):
-            cursor = conn(_type).find(query, {"site": 1, "recordType": 1, filed_name: 1, "_id": 0})
+            cursor = conn(_type).find(query, {"site": 1, "record_type": 1, "recordType": 1, filed_name: 1, "_id": 0})
             for item in cursor:
                 if not item.get(filed_name):
                     continue
-                record_type = item.get("recordType", "unknown")
+                record_type = item.get("record_type") or item.get("recordType", "unknown")
                 site = item.get("site", "unknown_site")
                 content = item.get(filed_name, "")
                 items_set.add(f"{site} [{record_type}] {content}")
@@ -655,4 +759,6 @@ from .assetNpocService import ns as asset_npoc_service_ns
 from .assetCip import ns as asset_cip_ns
 from .assetNucleiResult import ns as asset_nuclei_result_ns
 from .assetStatFinger import ns as asset_stat_finger_ns
+from .mcp import ns as mcp_ns
+
 

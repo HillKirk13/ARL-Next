@@ -5,6 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ARL-Next</title>
+      <script>
+      (function() {
+        try {
+          var token = localStorage.getItem("token") || localStorage.getItem("arl_token");
+          if (token && !document.cookie.includes("arl_token=")) {
+            document.cookie = "arl_token=" + token + "; path=/; max-age=604800; SameSite=Lax";
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

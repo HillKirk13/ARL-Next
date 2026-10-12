@@ -90,12 +90,54 @@
           </template>
         </a-input>
       </div>
+
+      <!-- 如果不是 site Tab，在搜索栏末尾展示时间筛选（如文件泄露 Tab，对齐用户需求） -->
+      <div v-if="activeTab !== 'site'" class="search-item" style="display: inline-flex; align-items: center;">
+        <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
+        <a-range-picker
+            v-model:value="dateRange"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始时间', '结束时间']"
+            style="width: 330px;"
+            allowClear
+            @change="onDateRangeChange"
+        />
+        <a-button-group style="margin-left: 8px;">
+          <a-button :type="quickDay === 1 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(1)">1天</a-button>
+          <a-button :type="quickDay === 3 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(3)">3天</a-button>
+          <a-button :type="quickDay === 5 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(5)">5天</a-button>
+          <a-button :type="quickDay === 7 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(7)">7天</a-button>
+        </a-button-group>
+      </div>
     </div>
 
-    <div style="margin-bottom: 16px;">
+    <div style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap;">
       <a-button style="margin-right: 16px;" @click="resetSearch">清 除</a-button>
       <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="margin-right: 16px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
-      <a-button v-if="activeTab === 'site'" type="primary" @click="openRiskModal">风险任务下发</a-button>
+      <a-button v-if="activeTab === 'site'" type="primary" style="margin-right: 16px;" @click="openRiskModal">风险任务下发</a-button>
+
+      <!-- 如果是 site Tab，在“风险任务下发”右侧展示时间筛选（对齐用户需求） -->
+      <div v-if="activeTab === 'site'" class="search-item" style="display: inline-flex; align-items: center;">
+        <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
+        <a-range-picker
+            v-model:value="dateRange"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始时间', '结束时间']"
+            style="width: 330px;"
+            allowClear
+            @change="onDateRangeChange"
+        />
+        <a-button-group style="margin-left: 8px;">
+          <a-button :type="quickDay === 1 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(1)">1天</a-button>
+          <a-button :type="quickDay === 3 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(3)">3天</a-button>
+          <a-button :type="quickDay === 5 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(5)">5天</a-button>
+          <a-button :type="quickDay === 7 ? 'primary' : 'default'" size="middle" @click="handleQuickClick(7)">7天</a-button>
+        </a-button-group>
+      </div>
     </div>
 
     <a-table
@@ -489,6 +531,37 @@ const openFingerModal = async (fingerName) => {
   }
 };
 const searchForm = ref({});
+const dateRange = ref(null);
+const quickDay = ref(null);
+
+const formatDateTime = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+};
+
+const handleQuickClick = (days) => {
+  if (quickDay.value === days) {
+    quickDay.value = null;
+    dateRange.value = null;
+  } else {
+    quickDay.value = days;
+    const now = new Date();
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    dateRange.value = [formatDateTime(start), formatDateTime(now)];
+  }
+  onSearch();
+};
+
+const onDateRangeChange = () => {
+  quickDay.value = null;
+  onSearch();
+};
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
 
 const previewVisible = ref(false);
@@ -498,7 +571,7 @@ const handlePreview = (url) => { previewImage.value = url; previewVisible.value 
 // 💡 简化版 Config：仅保留全局搜索需要的配置，去除 deleteUrl
 const tabConfig = reactive({
   site: {
-    url: '/asset_site/',
+    url: '/site/',
     searchFields: [
       { label: '站点', key: 'site', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
@@ -528,8 +601,8 @@ const tabConfig = reactive({
   },
   // 💡 新增：子域名 Tab 的 1:1 配置
   domain: {
-    url: '/asset_domain/',
-    exportUrl: '/asset_domain/export/',
+    url: '/domain/',
+    exportUrl: '/domain/export/',
     exportName: '子域名',
     searchFields: [
       { label: '域名', key: 'domain', operator: '=' },
@@ -551,9 +624,9 @@ const tabConfig = reactive({
   // 💡 新增：IP Tab 的 1:1 配置
 // 💡 新增：IP Tab 的 1:1 配置
   ip: {
-    url: '/asset_ip/',
+    url: '/ip/',
     deleteUrl: '/asset_ip/delete/', // 视上一轮测试情况，如果删不掉请改回 '/site/delete/'
-    exportUrl: '/asset_ip/export/',
+    exportUrl: '/ip/export/',
     exportName: ' IP 端口',
     searchFields: [
       { label: 'IP', key: 'ip', operator: '=' },
@@ -587,7 +660,7 @@ const tabConfig = reactive({
   },
   // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
   cert: {
-    url: '/asset_cert/',
+    url: '/cert/',
     searchFields: [
       { label: 'IP字段', key: 'ip', operator: '=' },
       { label: '签发者名称', key: 'cert.issuer_dn', operator: '=' },
@@ -604,7 +677,7 @@ const tabConfig = reactive({
 
   // 💡 新增：服务 Tab 的 1:1 配置
   service: {
-    url: '/asset_service/',
+    url: '/service/',
     // 🚨 故意不写 exportUrl，完美对齐原版不带导出功能的 UI
     searchFields: [
       { label: '服务', key: 'service_name', operator: '=' },
@@ -622,7 +695,7 @@ const tabConfig = reactive({
 
   // 💡 新增：文件泄露 Tab 的 1:1 配置
   fileleak: {
-    url: '/asset_fileleak/',
+    url: '/fileleak/',
     // 🚨 同样不配置 exportUrl，隐身导出按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
@@ -641,8 +714,8 @@ const tabConfig = reactive({
 
   // 💡 新增：URL信息 Tab 的 1:1 配置
   url: {
-    url: '/asset_url/',
-    exportUrl: '/asset_url/export/', // 恢复导出接口
+    url: '/url/',
+    exportUrl: '/url/export/', // 恢复导出接口
     exportName: 'URL信息',     // 自动生成“导出URL信息”按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
@@ -682,7 +755,7 @@ const tabConfig = reactive({
 
   // 💡 新增：风险 Tab 的 1:1 配置
   vuln: {
-    url: '/asset_vuln/',
+    url: '/vuln/',
     // 🚨 截图显示无导出按钮，所以不配置 exportUrl
     searchFields: [
       { label: '漏洞名称', key: 'vul_name', operator: '=' },
@@ -703,7 +776,7 @@ const tabConfig = reactive({
 
   // 💡 新增：服务(python) Tab 的 1:1 配置
   npoc_service: {
-    url: '/asset_npoc_service/',
+    url: '/npoc_service/',
     // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { label: '协议', key: 'protocol', operator: '=' },
@@ -723,8 +796,8 @@ const tabConfig = reactive({
 
   // 💡 新增：C段 Tab 的 1:1 配置
   cip: {
-    url: '/asset_cip/',
-    exportUrl: '/asset_cip/export/', // 恢复导出接口
+    url: '/cip/',
+    exportUrl: '/cip/export/', // 恢复导出接口
     exportName: 'C段',         // 自动生成“导出C段”按钮
     searchFields: [
       { label: 'C段', key: 'cidr_ip', operator: '=' }
@@ -739,7 +812,7 @@ const tabConfig = reactive({
 
   // 💡 新增：nuclei Tab 的 1:1 配置
   nuclei_result: {
-    url: '/asset_nuclei_result/',
+    url: '/nuclei_result/',
     deleteUrl: '/asset_nuclei_result/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
     // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
@@ -762,7 +835,7 @@ const tabConfig = reactive({
 
   // 💡 新增：指纹统计 Tab 的 1:1 配置
   stat_finger: {
-    url: '/asset_stat_finger/',
+    url: '/stat_finger/',
     deleteUrl: '/asset_site/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
     // 🚨 截图显示无导出按钮
     searchFields: [
@@ -785,8 +858,8 @@ const tabConfig = reactive({
   // 💡 新增：WIH (Web Info Hunter) Tab 的 1:1 配置
 // 💡 修复：WIH (Web Info Hunter) Tab 配置
   wih: {
-    url: '/asset_wih/',
-    exportUrl: '/asset_wih/export/',
+    url: '/wih/',
+    exportUrl: '/wih/export/',
     exportName: 'WIH',
     searchFields: [
       {
@@ -818,6 +891,10 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const params = { page: pagination.current, size: pagination.pageSize };
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
+      params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
+      params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
+    }
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
         let paramKey = key;
@@ -851,6 +928,10 @@ const handleExport = async () => {
   try {
     message.loading({ content: `正在生成${config.exportName}导出文件...`, key: 'export_data' });
     const params = { page: 1, size: 100000 };
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
+      params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
+      params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
+    }
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
         let paramKey = key;
@@ -882,13 +963,15 @@ const handleExport = async () => {
 };
 
 const onSearch = () => { pagination.current = 1; fetchData(); };
-const resetSearch = () => { searchForm.value = {}; onSearch(); };
+const resetSearch = () => { searchForm.value = {}; dateRange.value = null; quickDay.value = null; onSearch(); };
 const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
 
 watch(activeTab, (newVal) => {
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
     searchForm.value = {};
+    dateRange.value = null;
+    quickDay.value = null;
     pagination.current = 1;
     fetchData();
   }
@@ -933,6 +1016,10 @@ const openRiskModal = async () => {
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
     const setParams = { ...searchForm.value }; // 全局模式直接传搜索参数
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
+      setParams.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
+      setParams.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
+    }
     const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
