@@ -118,7 +118,11 @@ class AddSiteTagARL(ARLResource):
         tag = args.pop("tag")
 
         query = {"_id": ObjectId(site_id)}
-        data = utils.conn_db('site').find_one(query)
+        target_coll = 'site'
+        data = utils.conn_db(target_coll).find_one(query)
+        if not data:
+            target_coll = 'asset_site'
+            data = utils.conn_db(target_coll).find_one(query)
         if not data:
             return utils.build_ret(ErrorMsg.SiteIdNotFound, {"site_id": site_id})
 
@@ -136,7 +140,7 @@ class AddSiteTagARL(ARLResource):
 
         tag_list.append(tag)
 
-        utils.conn_db('site').update_one(query, {"$set": {"tag": tag_list}})
+        utils.conn_db(target_coll).update_one(query, {"$set": {"tag": tag_list}})
 
         return utils.build_ret(ErrorMsg.Success, {"tag": tag})
 
@@ -161,7 +165,11 @@ class DeleteSiteTagARL(ARLResource):
         tag = args.pop("tag")
 
         query = {"_id": ObjectId(site_id)}
-        data = utils.conn_db('site').find_one(query)
+        target_coll = 'site'
+        data = utils.conn_db(target_coll).find_one(query)
+        if not data:
+            target_coll = 'asset_site'
+            data = utils.conn_db(target_coll).find_one(query)
         if not data:
             return utils.build_ret(ErrorMsg.SiteIdNotFound, {"site_id": site_id})
 
@@ -179,7 +187,7 @@ class DeleteSiteTagARL(ARLResource):
 
         tag_list.remove(tag)
 
-        utils.conn_db('site').update_one(query, {"$set": {"tag": tag_list}})
+        utils.conn_db(target_coll).update_one(query, {"$set": {"tag": tag_list}})
 
         return utils.build_ret(ErrorMsg.Success, {"tag": tag})
 

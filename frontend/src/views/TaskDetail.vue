@@ -95,6 +95,36 @@
           </a-select>
         </div>
 
+        <template v-else-if="field.key === 'tag'">
+          <div style="display: inline-flex; align-items: center; gap: 6px;">
+            <a-auto-complete
+                v-model:value="searchForm[field.key]"
+                :options="commonTags.map(t => ({ value: t, label: t }))"
+                placeholder="请输入或选择标签"
+                style="width: 170px;"
+                allowClear
+                @select="() => onSearch()"
+                @pressEnter="onSearch"
+            >
+              <template #suffix>
+                <search-outlined @click="onSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" />
+              </template>
+            </a-auto-complete>
+            <a-button-group>
+              <a-button
+                v-for="qt in commonTags.slice(0, 3)"
+                :key="qt"
+                :type="searchForm.tag === qt ? 'primary' : 'default'"
+                size="middle"
+                style="padding: 0 8px;"
+                @click="handleQuickTagFilter(qt)"
+              >
+                {{ qt }}
+              </a-button>
+            </a-button-group>
+          </div>
+        </template>
+
         <a-input
             v-else
             v-model:value="searchForm[field.key]"
@@ -186,17 +216,86 @@
             <p v-if="record.favicon && record.favicon.hash" class="site-word">Favicon Hash: {{ record.favicon.hash }}</p>
             <p v-else-if="record.favicon_hash" class="site-word">Favicon Hash: {{ record.favicon_hash }}</p>
 
-            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                        <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
 
-              <a-tag v-if="record.is_entry || record.isEntry" closable style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);">入口</a-tag>
-
-              <template v-for="(t, idx) in (record.tags || record.tag || [])" :key="idx">
-                <a-tag closable style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);">
-                  {{ typeof t === 'string' ? t : (t.name || t.tag_name || t) }}
+              <!-- 已标记标签 -->
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">
+                  {{ t }}
                 </a-tag>
               </template>
 
-              <span class="add-tag" @click="openTagModal(record)" style="cursor: pointer;">添加标签</span>
+              <!-- 未标记的默认常用标签（行内一键直达打标，极速0点击弹窗） -->
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span
+                  v-if="!hasTag(record, t)"
+                  class="quick-tag-btn"
+                  @click.stop="toggleTag(record, t)"
+                  :title="`一键打标：${t}`"
+                >
+                  + {{ t }}
+                </span>
+              </template>
+
+              <!-- 就地快捷弹窗：添加自定义标签或管理常用标签 -->
+              <a-popover
+                v-model:open="record._tagPopoverVisible"
+                trigger="click"
+                placement="bottomLeft"
+                :overlayStyle="{ width: '280px' }"
+              >
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span
+                        v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))"
+                        @click="resetDefaultTags"
+                        style="font-size: 11px; color: #ff7875; cursor: pointer;"
+                      >
+                        恢复默认
+                      </span>
+                    </div>
+
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag
+                        v-for="t in commonTags"
+                        :key="t"
+                        :color="hasTag(record, t) ? 'orange' : 'default'"
+                        style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;"
+                        @click="toggleTag(record, t)"
+                      >
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined
+                          v-if="!DEFAULT_TAGS.includes(t)"
+                          style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;"
+                          title="从常用列表删除"
+                          @click.stop="deleteCommonTag(t)"
+                        />
+                      </a-tag>
+                    </div>
+
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input
+                          v-model:value="record._newTagInput"
+                          placeholder="新标签名称"
+                          size="small"
+                          style="flex: 1;"
+                          allowClear
+                          @pressEnter="handleAddNewCustomTag(record)"
+                        />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;">
+                  <plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签
+                </span>
+              </a-popover>
             </div>
           </div>
         </template>
@@ -497,12 +596,7 @@
       <img :src="previewImage" style="width: 100%; max-height: 85vh; object-fit: contain; display: block;" />
     </a-modal>
 
-    <!-- 添加标签弹窗 -->
-    <a-modal v-model:open="tagVisible" title="添加标签" @ok="submitTag" :confirmLoading="tagSubmitLoading" width="400px" okText="确 定" cancelText="取 消">
-      <div style="margin-top: 20px;">
-        <a-input v-model:value="newTagValue" placeholder="请输入标签名称" />
-      </div>
-    </a-modal>
+    
 <!--    风险任务下发弹窗-->
     <a-modal
         v-model:open="riskVisible"
@@ -545,7 +639,7 @@ import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed, creat
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
-import { SearchOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, ExclamationCircleOutlined, CheckOutlined, PlusOutlined, CloseOutlined } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 
 const route = useRoute();
@@ -607,41 +701,7 @@ const openFingerModal = async (fingerName) => {
   }
 };
 
-// 标签管理逻辑
-const tagVisible = ref(false);
-const tagSubmitLoading = ref(false);
-const newTagValue = ref('');
-const currentTagRecord = ref(null);
 
-const openTagModal = (record) => {
-  currentTagRecord.value = record;
-  newTagValue.value = '';
-  tagVisible.value = true;
-};
-
-const submitTag = async () => {
-  if (!newTagValue.value.trim()) {
-    return message.warning('标签名称不能为空');
-  }
-  tagSubmitLoading.value = true;
-  try {
-    const res = await request.post('/site/add_tag/', {
-      _id: currentTagRecord.value._id || currentTagRecord.value.id,
-      tag: newTagValue.value.trim()
-    });
-    if (res.code === 200) {
-      message.success('添加标签成功');
-      tagVisible.value = false;
-      fetchData(); // 重新加载数据
-    } else {
-      message.error(res.message || '添加标签失败');
-    }
-  } catch (error) {
-    message.error('请求异常');
-  } finally {
-    tagSubmitLoading.value = false;
-  }
-};
 
 const targetName = ref(query.targetName || '未知目标');
 const targetList = computed(() => {
@@ -1464,6 +1524,154 @@ const submitRiskTask = async () => {
 
 
 
+// 常用标签与自定义标签系统
+const DEFAULT_TAGS = ['入口', '重点', '后台'];
+const getSavedCustomTags = () => {
+  try {
+    const saved = localStorage.getItem('arl_custom_tags');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+  return [...DEFAULT_TAGS];
+};
+
+const commonTags = ref(getSavedCustomTags());
+
+const saveCustomTags = () => {
+  try {
+    localStorage.setItem('arl_custom_tags', JSON.stringify(commonTags.value));
+  } catch (e) {}
+};
+
+const getRecordTags = (record) => {
+  if (!record) return [];
+  const list = [];
+  const raw = record.tag || record.tags || [];
+  if (Array.isArray(raw)) {
+    raw.forEach(t => {
+      const name = typeof t === 'string' ? t.trim() : (t?.name || t?.tag_name || String(t)).trim();
+      if (name && !list.includes(name)) list.push(name);
+    });
+  } else if (typeof raw === 'string' && raw.trim()) {
+    list.push(raw.trim());
+  }
+  if ((record.is_entry || record.isEntry) && !list.includes('入口')) {
+    list.unshift('入口');
+  }
+  return list;
+};
+
+const hasTag = (record, tag) => {
+  return getRecordTags(record).includes(tag);
+};
+
+const updateLocalRecordTag = (record, tag, action) => {
+  let tags = getRecordTags(record);
+  if (action === 'add') {
+    if (!tags.includes(tag)) tags.push(tag);
+  } else if (action === 'remove') {
+    tags = tags.filter(t => t !== tag);
+    if (tag === '入口') {
+      record.is_entry = false;
+      record.isEntry = false;
+    }
+  }
+  record.tag = [...tags];
+  record.tags = [...tags];
+};
+
+const toggleTag = async (record, tag) => {
+  const isPresent = hasTag(record, tag);
+  const siteId = record._id || record.id;
+  try {
+    if (isPresent) {
+      const res = await request.post('/site/delete_tag/', { _id: siteId, tag });
+      if (res.code === 200) {
+        message.success(`已移除标签「${tag}」`);
+        updateLocalRecordTag(record, tag, 'remove');
+      } else {
+        message.error(res.message || '移除标签失败');
+      }
+    } else {
+      const res = await request.post('/site/add_tag/', { _id: siteId, tag });
+      if (res.code === 200) {
+        message.success(`已添加标签「${tag}」`);
+        updateLocalRecordTag(record, tag, 'add');
+      } else {
+        message.error(res.message || '添加标签失败');
+      }
+    }
+  } catch (e) {
+    message.error('标签操作请求异常');
+  }
+};
+
+const handleRemoveTag = async (record, tag) => {
+  const tagStr = typeof tag === 'string' ? tag : (tag.name || tag.tag_name || tag);
+  try {
+    const res = await request.post('/site/delete_tag/', {
+      _id: record._id || record.id,
+      tag: tagStr
+    });
+    if (res.code === 200) {
+      message.success(`删除标签「${tagStr}」成功`);
+      updateLocalRecordTag(record, tagStr, 'remove');
+    } else {
+      message.error(res.message || '删除标签失败');
+    }
+  } catch (error) {
+    message.error('请求异常');
+  }
+};
+
+const handleAddNewCustomTag = async (record) => {
+  const val = (record._newTagInput || '').trim();
+  if (!val) {
+    return message.warning('标签名称不能为空');
+  }
+  const siteId = record._id || record.id;
+  try {
+    const res = await request.post('/site/add_tag/', { _id: siteId, tag: val });
+    if (res.code === 200) {
+      message.success(`已添加标签「${val}」`);
+      updateLocalRecordTag(record, val, 'add');
+      if (!commonTags.value.includes(val)) {
+        commonTags.value.push(val);
+        saveCustomTags();
+      }
+      record._newTagInput = '';
+    } else {
+      message.error(res.message || '添加标签失败');
+    }
+  } catch (e) {
+    message.error('添加标签请求异常');
+  }
+};
+
+const deleteCommonTag = (tag) => {
+  commonTags.value = commonTags.value.filter(t => t !== tag);
+  saveCustomTags();
+  message.info(`已从常用标签中移除「${tag}」`);
+};
+
+const resetDefaultTags = () => {
+  commonTags.value = [...DEFAULT_TAGS];
+  saveCustomTags();
+  message.success('已恢复为默认 3 个快捷标签');
+};
+
+const handleQuickTagFilter = (tag) => {
+  if (searchForm.value.tag === tag) {
+    searchForm.value.tag = '';
+  } else {
+    searchForm.value.tag = tag;
+  }
+  onSearch();
+};
 </script>
 
 <style scoped>
@@ -1558,4 +1766,24 @@ const submitRiskTask = async () => {
   margin-bottom: 0;
   line-height: 1.5;
 }
+
+.quick-tag-btn {
+  font-size: 12px;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  color: #888;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+}
+.quick-tag-btn:hover {
+  background: #fff2e8;
+  color: #ff7a45;
+  border-color: #ffbb96;
+}
+
 </style>

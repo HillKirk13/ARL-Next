@@ -45,6 +45,8 @@ services:
       - ./backend/app/utils/user.py:/code/backend/app/utils/user.py
       - ./backend/app/routes/user.py:/code/backend/app/routes/user.py
       - ./backend/app/routes/__init__.py:/code/backend/app/routes/__init__.py
+      - ./backend/app/routes/site.py:/code/backend/app/routes/site.py
+      - ./backend/app/routes/assetSite.py:/code/backend/app/routes/assetSite.py
       - ./backend/app/routes/dictionary.py:/code/backend/app/routes/dictionary.py
       - ./backend/app/routes/brute_dict.py:/code/backend/app/routes/brute_dict.py
       - arl_screenshots:/code/backend/app/tmp_screenshot
