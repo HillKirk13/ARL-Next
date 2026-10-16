@@ -1,7 +1,7 @@
 <template>
   <div style="background-color: var(--arl-bg-layout); padding: 24px; min-height: calc(100vh - 64px);">
 
-        <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
+    <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
       <a-tab-pane key="site" tab="站点"></a-tab-pane>
       <a-tab-pane key="domain" tab="子域名"></a-tab-pane>
       <a-tab-pane key="ip" tab="IP"></a-tab-pane>
@@ -18,6 +18,41 @@
     </a-tabs>
 
     <div v-if="tabConfig[activeTab]?.searchFields" class="search-row" style="margin-bottom: 16px;">
+      <!-- 任务筛选：所有Tab置顶支持按任务过滤 -->
+      <div class="search-item" style="display: flex; align-items: center;">
+        <span class="label">所属任务：</span>
+        <a-select
+          v-model:value="selectedTaskIds"
+          mode="multiple"
+          :max-tag-count="2"
+          option-label-prop="label"
+          show-search
+          :filter-option="filterTaskOption"
+          placeholder="请选择任务(可多选)"
+          style="min-width: 280px; max-width: 460px;"
+          allowClear
+          :loading="taskLoading"
+          @search="handleTaskSearch"
+          @change="() => onSearch()"
+        >
+          <a-select-option
+            v-for="t in taskOptions"
+            :key="t.value"
+            :value="t.value"
+            :label="t.name"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;" :title="`${t.name} (${t.target})`">
+                {{ t.name }} <span style="font-size: 11px; opacity: 0.65;">{{ t.target }}</span>
+              </span>
+              <a-tag :color="t.status === 'done' ? 'green' : (t.status === 'error' ? 'red' : 'blue')" style="font-size: 10px; margin: 0; line-height: 18px; height: 18px; padding: 0 4px;">
+                {{ t.status }}
+              </a-tag>
+            </div>
+          </a-select-option>
+        </a-select>
+      </div>
+
       <div v-for="field in tabConfig[activeTab].searchFields" :key="field.key" class="search-item">
         <span class="label">{{ field.label }}：</span>
 
@@ -77,6 +112,7 @@
           </a-select>
         </div>
 
+        <!-- 标签字段搜索：AutoComplete + 快捷药丸 -->
         <template v-else-if="field.key === 'tag'">
           <div style="display: inline-flex; align-items: center; gap: 6px;">
             <a-auto-complete
@@ -121,7 +157,7 @@
         </a-input>
       </div>
 
-      <!-- 如果不是 site Tab，在搜索栏末尾展示时间筛选（如文件泄露 Tab，对齐用户需求） -->
+      <!-- 时间筛选 -->
       <div v-if="activeTab !== 'site'" class="search-item" style="display: inline-flex; align-items: center;">
         <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
         <a-range-picker
@@ -143,12 +179,53 @@
       </div>
     </div>
 
-    <div style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap;">
-      <a-button style="margin-right: 16px;" @click="resetSearch">清 除</a-button>
-      <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="margin-right: 16px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
-      <a-button v-if="activeTab === 'site'" type="primary" style="margin-right: 16px;" @click="openRiskModal">风险任务下发</a-button>
+    <div style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+      <a-button style="margin-right: 8px;" @click="resetSearch">清 除</a-button>
+      <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="margin-right: 8px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
+      <a-button v-if="activeTab === 'site'" type="primary" style="margin-right: 8px;" @click="openRiskModal">风险任务下发</a-button>
 
-      <!-- 如果是 site Tab，在“风险任务下发”右侧展示时间筛选（对齐用户需求） -->
+      <!-- 当前选中任务药丸反馈 -->
+      <div v-if="selectedTaskInfos && selectedTaskInfos.length > 0" style="display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-right: 8px;">
+        <template v-if="selectedTaskInfos.length <= 3">
+          <a-tag
+            v-for="task in selectedTaskInfos"
+            :key="task.value"
+            closable
+            color="blue"
+            style="font-size: 12px; padding: 1px 8px; cursor: pointer; margin: 0;"
+            @close.prevent="removeSelectedTask(task.value)"
+            :title="`点击移除任务：${task.name}`"
+          >
+            <span>已选：<strong>{{ task.name }}</strong><span v-if="task.target" style="opacity: 0.8; font-size: 11px;"> ({{ task.target }})</span></span>
+          </a-tag>
+        </template>
+        <template v-else>
+          <a-tag
+            v-for="task in selectedTaskInfos.slice(0, 2)"
+            :key="task.value"
+            closable
+            color="blue"
+            style="font-size: 12px; padding: 1px 8px; cursor: pointer; margin: 0;"
+            @close.prevent="removeSelectedTask(task.value)"
+            :title="`点击移除任务：${task.name}`"
+          >
+            <span>已选：<strong>{{ task.name }}</strong></span>
+          </a-tag>
+          <a-tag color="cyan" style="font-size: 12px; padding: 1px 8px; margin: 0;">
+            还有 {{ selectedTaskInfos.length - 2 }} 个任务
+          </a-tag>
+        </template>
+        <a-button
+          type="link"
+          size="small"
+          style="padding: 0 4px; font-size: 12px; height: auto;"
+          @click="clearAllSelectedTasks"
+        >
+          清空任务({{ selectedTaskInfos.length }})
+        </a-button>
+      </div>
+
+      <!-- 站点 Tab 时间筛选 -->
       <div v-if="activeTab === 'site'" class="search-item" style="display: inline-flex; align-items: center;">
         <span class="label" style="min-width: unset; margin-right: 8px;">时间：</span>
         <a-range-picker
@@ -179,125 +256,512 @@
         size="middle"
         :rowKey="(record) => record._id || record.id"
     >
-            <template #bodyCell="{ column, record, index }">
+      <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'">
-          <a style="">{{ (pagination.current - 1) * pagination.pageSize + index + 1 }}</a>
+          <a>{{ (pagination.current - 1) * pagination.pageSize + index + 1 }}</a>
         </template>
-<!--表格-站点列-->
+
+        <!-- 表格 - 站点列 -->
         <template v-else-if="column.key === 'site'">
           <div class="site-header">
             <a :href="record.site || record.url" target="_blank" style="font-weight: 500;">
               <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
               <img v-else-if="typeof record.favicon === 'string'" :src="`data:image/png;base64,${record.favicon}`" class="site-img" />
-
               {{ record.site || record.url }}
             </a>
-
             <p v-if="record.favicon && record.favicon.hash" class="site-word">Favicon Hash: {{ record.favicon.hash }}</p>
             <p v-else-if="record.favicon_hash" class="site-word">Favicon Hash: {{ record.favicon_hash }}</p>
-
-                        <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-
-              <!-- 已标记标签 -->
+            <!-- 标签行 -->
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
               <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
-                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">
-                  {{ t }}
-                </a-tag>
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
               </template>
-
-              <!-- 未标记的默认常用标签（行内一键直达打标，极速0点击弹窗） -->
               <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
-                <span
-                  v-if="!hasTag(record, t)"
-                  class="quick-tag-btn"
-                  @click.stop="toggleTag(record, t)"
-                  :title="`一键打标：${t}`"
-                >
-                  + {{ t }}
-                </span>
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
               </template>
-
-              <!-- 就地快捷弹窗：添加自定义标签或管理常用标签 -->
-              <a-popover
-                v-model:open="record._tagPopoverVisible"
-                trigger="click"
-                placement="bottomLeft"
-                :overlayStyle="{ width: '280px' }"
-              >
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
                 <template #content>
                   <div style="padding: 2px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                       <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
-                      <span
-                        v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))"
-                        @click="resetDefaultTags"
-                        style="font-size: 11px; color: #ff7875; cursor: pointer;"
-                      >
-                        恢复默认
-                      </span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
                     </div>
-
                     <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
-                      <a-tag
-                        v-for="t in commonTags"
-                        :key="t"
-                        :color="hasTag(record, t) ? 'orange' : 'default'"
-                        style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;"
-                        @click="toggleTag(record, t)"
-                      >
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
                         <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
                         {{ t }}
-                        <close-outlined
-                          v-if="!DEFAULT_TAGS.includes(t)"
-                          style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;"
-                          title="从常用列表删除"
-                          @click.stop="deleteCommonTag(t)"
-                        />
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
                       </a-tag>
                     </div>
-
                     <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
                       <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
                       <div style="display: flex; gap: 6px;">
-                        <a-input
-                          v-model:value="record._newTagInput"
-                          placeholder="新标签名称"
-                          size="small"
-                          style="flex: 1;"
-                          allowClear
-                          @pressEnter="handleAddNewCustomTag(record)"
-                        />
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
                         <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
                       </div>
                     </div>
                   </div>
                 </template>
-                <span class="add-tag" style="cursor: pointer; user-select: none;">
-                  <plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签
-                </span>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
               </a-popover>
             </div>
           </div>
         </template>
 
+        <!-- 表格 - 子域名列 -->
+        <template v-else-if="column.key === 'domain_col'">
+          <div>
+            <a :href="`http://${record.domain}`" target="_blank" style="font-weight: 500;">{{ record.domain }}</a>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - IP列 -->
+        <template v-else-if="column.key === 'ip_col'">
+          <div>
+            <span style="font-weight: 500; font-family: monospace; font-size: 14px;">{{ record.ip }}</span>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - SSL证书 HOST 列 -->
+        <template v-else-if="column.key === 'cert_host_col'">
+          <div>
+            <span style="font-weight: 500; font-family: monospace;">{{ record.ip }}:{{ record.port }}</span>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - 服务列 -->
+        <template v-else-if="column.key === 'service_col'">
+          <div>
+            <span style="font-weight: 500;">{{ record.service_name }}</span>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - 文件泄露 URL 列 -->
+        <template v-else-if="column.key === 'fileleak_url_col'">
+          <div>
+            <a :href="record.url" target="_blank" style="word-break: break-all; font-weight: 500;">{{ record.url }}</a>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - URL信息列 -->
+        <template v-else-if="column.key === 'url_link_col'">
+          <div>
+            <a :href="record.url" target="_blank" style="word-break: break-all; font-weight: 500;">{{ record.url }}</a>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - 风险列 -->
+        <template v-else-if="column.key === 'vuln_col'">
+          <div>
+            <span style="font-weight: 500; color: #f5222d;">{{ record.vul_name }}</span>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - 服务(python) 列 -->
+        <template v-else-if="column.key === 'npoc_target_col'">
+          <div>
+            <span style="font-weight: 500;">{{ record.target || `${record.host}:${record.port}` }}</span>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - C段列 -->
+        <template v-else-if="column.key === 'cidr_col'">
+          <div>
+            <a style="cursor: pointer; font-family: monospace; font-size: 14px; font-weight: 500;" @click="openCidrDetail(record)">{{ record.cidr_ip || '-' }}</a>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - Nuclei 列 -->
+        <template v-else-if="column.key === 'nuclei_col'">
+          <div>
+            <div style="font-weight: 500;">{{ record.vuln_name || record.template_id }}</div>
+            <div style="font-size: 12px; color: #888;">ID: {{ record.template_id }}</div>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 表格 - WIH 内容列 -->
+        <template v-else-if="column.key === 'wih_content_col'">
+          <div>
+            <div style="font-weight: 500; word-break: break-all;">{{ record.content }}</div>
+            <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                <a-tag closable color="orange" style="margin: 0;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+              </template>
+              <template v-for="t in DEFAULT_TAGS" :key="'quick-' + t">
+                <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+              </template>
+              <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="bottomLeft" :overlayStyle="{ width: '280px' }">
+                <template #content>
+                  <div style="padding: 2px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                      <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                      <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                        <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                        {{ t }}
+                        <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                      </a-tag>
+                    </div>
+                    <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                      <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                      <div style="display: flex; gap: 6px;">
+                        <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                        <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />添加标签</span>
+              </a-popover>
+            </div>
+          </div>
+        </template>
+
+        <!-- 其余常规字段模板 -->
         <template v-else-if="column.key === 'title'">
           <a-tooltip placement="topLeft" :overlayStyle="{ maxWidth: '400px' }">
             <template #title>
-              <div style="word-break: break-all;">
-                {{ record.title }}
-              </div>
+              <div style="word-break: break-all;">{{ record.title }}</div>
             </template>
-            <div style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              {{ record.title }}
-            </div>
+            <div style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ record.title }}</div>
           </a-tooltip>
         </template>
 
         <template v-else-if="column.key === 'headers'">
           <div class="scroll-x"><pre>{{ record.headers }}</pre></div>
         </template>
-
-
 
         <template v-else-if="column.key === 'finger'">
           <div v-if="record.finger && record.finger.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px;">
@@ -313,12 +777,11 @@
           </div>
         </template>
 
-
         <template v-else-if="column.key === 'screenshot'">
           <img v-if="record.screenshot" :src="`/api${record.screenshot}`" style="width: 280px; height: 160px; object-fit: cover; object-position: top; cursor: pointer; border: 1px solid var(--arl-border-color); border-radius: 4px;" @click="handlePreview(`/api${record.screenshot}`)" />
           <span v-else>-</span>
         </template>
-<!--        插槽-->
+
         <template v-else-if="column.key === 'record'">
           <div v-if="record.record && record.record.length">
             <div v-for="(r, i) in record.record" :key="i">{{ r }}</div>
@@ -328,37 +791,31 @@
 
         <template v-else-if="column.key === 'ips'">
           <div v-if="record.ips && record.ips.length">
-
-            <a-tooltip
-                v-if="record.ips.length > 5"
-                placement="top"
-                :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }"
-            >
+            <a-tooltip v-if="record.ips.length > 5" placement="top" :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }">
               <template #title>
                 <div v-for="(ip, i) in record.ips" :key="'all-'+i">{{ ip }}</div>
               </template>
-
               <div style="cursor: pointer;">
                 <div v-for="(ip, i) in record.ips.slice(0, 5)" :key="i">{{ ip }}</div>
                 <div style="color: var(--arl-text-color); opacity: 0.45; margin-top: 2px;">...等 {{ record.ips.length }} 个</div>
               </div>
             </a-tooltip>
-
             <div v-else>
               <div v-for="(ip, i) in record.ips" :key="i">{{ ip }}</div>
             </div>
-
           </div>
           <span v-else>-</span>
         </template>
+
         <template v-else-if="column.key === 'os_info'">
           <span>{{ record.os_info?.name || '-' }}</span>
         </template>
+
         <template v-else-if="column.key === 'port_info'">
           <span>{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
         </template>
-        <template v-else-if="column.key === 'domain'">
 
+        <template v-else-if="column.key === 'domain'">
           <div v-if="Array.isArray(record.domain) && record.domain.length">
             <a-tooltip v-if="record.domain.length > 5" placement="top" :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }">
               <template #title>
@@ -373,68 +830,54 @@
               <div v-for="(dom, i) in record.domain" :key="i">{{ dom }}</div>
             </div>
           </div>
-
           <span v-else-if="typeof record.domain === 'string'">{{ record.domain }}</span>
-
           <span v-else>-</span>
         </template>
+
         <template v-else-if="column.key === 'geo_city'">
           <span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span>
         </template>
+
         <template v-else-if="column.key === 'geo_asn'">
           <span>{{ record.geo_asn?.organization || '-' }}</span>
         </template>
 
-        <template v-else-if="column.key === 'host'">
-          <span>{{ record.ip }}:{{ record.port }}</span>
-        </template>
         <template v-else-if="column.key === 'cert_detail'">
           <div v-if="record.cert" style="font-size: 13px; line-height: 1.8; color: var(--arl-text-color); padding: 12px 0;">
-
             <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">基本信息</div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">主题名称</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.subject_dn || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">签发者名称</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.issuer_dn || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">使用者备用名称</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.extensions?.subjectAltName || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">序列号</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.serial_number || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 16px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">时间</div>
               <div style="flex: 1; color: var(--arl-text-color);">{{ record.cert.validity?.start || '-' }} 至 {{ record.cert.validity?.end || '-' }}</div>
             </div>
-
             <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">指纹</div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-256</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.fingerprint?.sha256 || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-1</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.fingerprint?.sha1 || '-' }}</div>
             </div>
-
             <div style="display: flex; margin-bottom: 6px;">
               <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">MD5</div>
               <div style="flex: 1; word-break: break-all; color: var(--arl-text-color);">{{ record.cert.fingerprint?.md5 || '-' }}</div>
             </div>
-
           </div>
           <span v-else>-</span>
         </template>
@@ -447,6 +890,7 @@
           </div>
           <span v-else>-</span>
         </template>
+
         <template v-else-if="column.key === 'product'">
           <div v-if="record.service_info && record.service_info.length">
             <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
@@ -456,7 +900,7 @@
           <span v-else>-</span>
         </template>
 
-        <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
+        <template v-else-if="column.key === 'nuclei_vuln_url'">
           <a :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">
             {{ record.url || record.vuln_url || '-' }}
           </a>
@@ -504,9 +948,7 @@
             <a-popover v-if="record.sites && record.sites.length > 1" placement="topLeft">
               <template #content>
                 <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-                  <a v-for="(s, idx) in record.sites.slice(1)" :key="idx" :href="s" target="_blank" style="word-break: break-all;">
-                    {{ s }}
-                  </a>
+                  <a v-for="(s, idx) in record.sites.slice(1)" :key="idx" :href="s" target="_blank" style="word-break: break-all;">{{ s }}</a>
                 </div>
               </template>
               <a-badge :count="`+${record.sites.length - 1} 站点`" :number-style="{ backgroundColor: '#1890ff', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '0 6px', fontSize: '12px' }" />
@@ -517,7 +959,7 @@
       </template>
     </a-table>
 
-    <!-- 综合C段详情弹窗 (提取为组件) -->
+    <!-- 综合C段详情弹窗 -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
     <div v-if="tabConfig[activeTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 16px;">
@@ -541,10 +983,6 @@
       </a-form>
     </a-modal>
 
-  </div>
-
-    
-
     <!-- 指纹统计关联站点弹窗 -->
     <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
       <a-table
@@ -564,23 +1002,20 @@
           <template v-else-if="column.key === 'title'">
             <a-tooltip placement="topLeft" :overlayStyle="{ maxWidth: '400px' }">
               <template #title>
-                <div style="word-break: break-all;">
-                  {{ record.title }}
-                </div>
+                <div style="word-break: break-all;">{{ record.title }}</div>
               </template>
-              <div style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                {{ record.title }}
-              </div>
+              <div style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ record.title }}</div>
             </a-tooltip>
           </template>
         </template>
       </a-table>
     </a-modal>
 
+  </div>
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, watch , onUnmounted } from 'vue';
+import { ref, computed, onMounted, reactive, watch, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
@@ -591,6 +1026,78 @@ const route = useRoute();
 const activeTab = ref('site');
 const loading = ref(false);
 const dataSource = ref([]);
+
+// 任务筛选管理
+const selectedTaskIds = ref([]);
+const taskOptions = ref([]);
+const taskLoading = ref(false);
+
+const selectedTaskInfos = computed(() => {
+  if (!selectedTaskIds.value || selectedTaskIds.value.length === 0) return [];
+  return selectedTaskIds.value.map(id => {
+    const found = taskOptions.value.find(t => t.value === id);
+    return found || {
+      value: id,
+      name: id,
+      target: ''
+    };
+  });
+});
+
+const removeSelectedTask = (id) => {
+  selectedTaskIds.value = selectedTaskIds.value.filter(item => item !== id);
+  onSearch();
+};
+
+const clearAllSelectedTasks = () => {
+  selectedTaskIds.value = [];
+  onSearch();
+};
+
+const loadTaskOptions = async (keyword = '') => {
+  taskLoading.value = true;
+  try {
+    const params = { page: 1, size: 60, order: '-_id' };
+    if (keyword) {
+      params.name = keyword;
+    }
+    const res = await request.get('/task/', { params });
+    if (res.code === 200 && res.items) {
+      const newOpts = res.items.map(t => ({
+        value: t._id,
+        label: `${t.name || '未命名'} ${t.target ? '(' + t.target + ')' : ''}`,
+        name: t.name || '未命名任务',
+        target: t.target || '',
+        status: t.status || 'unknown',
+        start_time: t.start_time || ''
+      }));
+
+      // 保留当前已选中的任务，即使关键词搜索切换也不会丢失已选项的名称
+      const existingSelected = taskOptions.value.filter(t => (selectedTaskIds.value || []).includes(t.value));
+      const map = new Map();
+      [...existingSelected, ...newOpts].forEach(item => {
+        map.set(item.value, item);
+      });
+      taskOptions.value = Array.from(map.values());
+    }
+  } catch (e) {
+    console.error('加载任务列表失败', e);
+  } finally {
+    taskLoading.value = false;
+  }
+};
+
+const filterTaskOption = (input, option) => {
+  if (!input) return true;
+  const text = (option.label || '') + (option.value || '') + (option.name || '');
+  return text.toLowerCase().includes(input.toLowerCase());
+};
+
+const handleTaskSearch = (val) => {
+  if (val && val.length >= 2) {
+    loadTaskOptions(val);
+  }
+};
 
 const fingerModalVisible = ref(false);
 const currentFingerName = ref('');
@@ -662,7 +1169,7 @@ const previewVisible = ref(false);
 const previewImage = ref('');
 const handlePreview = (url) => { previewImage.value = url; previewVisible.value = true; };
 
-// 💡 简化版 Config：仅保留全局搜索需要的配置，去除 deleteUrl
+// 💡 完整配置表：覆盖全部Tab的丰富检索与标签体系
 const tabConfig = reactive({
   site: {
     url: '/site/',
@@ -682,53 +1189,54 @@ const tabConfig = reactive({
       { label: 'favicon hash', key: 'favicon.hash', operator: '=' },
       { label: '标签', key: 'tag', operator: '=' }
     ],
-    // 💥 修复：删除了瞎加的 IP、端口和操作列，完全对齐原版站点表格！表格控制
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '站点', key: 'site', width: 250 },
-      { title: '状态码', dataIndex: 'status', key: 'status', width: 100, align: 'center' },
+      { title: '站点', key: 'site', width: 260 },
+      { title: '状态码', dataIndex: 'status', key: 'status', width: 90, align: 'center' },
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
-      { title: 'headers', key: 'headers',width: 500},
+      { title: 'headers', key: 'headers', width: 450 },
       { title: 'finger', key: 'finger', width: 150 },
-      { title: '截图', key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
+      { title: '截图', key: 'screenshot', width: 280 }
     ]
   },
-  // 💡 新增：子域名 Tab 的 1:1 配置
+
   domain: {
     url: '/domain/',
     exportUrl: '/domain/export/',
     exportName: '子域名',
     searchFields: [
       { label: '域名', key: 'domain', operator: '=' },
+      { label: '根域名', key: 'fld', operator: '=' },
       { label: '记录值', key: 'record', operator: '=' },
       { label: '类型', key: 'type', operator: '=' },
       { label: 'IP', key: 'ips', operator: '=' },
-      { label: '来源', key: 'source', operator: '=' }
+      { label: '来源', key: 'source', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '域名', dataIndex: 'domain', key: 'domain', width: 250 },
-      { title: '解析类型', dataIndex: 'type', key: 'type', width: 120 },
-      { title: '记录值', key: 'record', width: 300 },
-      { title: '关联IP', key: 'ips', width: 250 },
-      { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
+      { title: '域名', key: 'domain_col', width: 280 },
+      { title: '解析类型', dataIndex: 'type', key: 'type', width: 110 },
+      { title: '记录值', key: 'record', width: 280 },
+      { title: '关联IP', key: 'ips', width: 240 },
+      { title: '来源', dataIndex: 'source', key: 'source', width: 140 }
     ]
   },
 
-  // 💡 新增：IP Tab 的 1:1 配置
-// 💡 新增：IP Tab 的 1:1 配置
   ip: {
     url: '/ip/',
-    deleteUrl: '/asset_ip/delete/', // 视上一轮测试情况，如果删不掉请改回 '/site/delete/'
+    deleteUrl: '/asset_ip/delete/',
     exportUrl: '/ip/export/',
     exportName: ' IP 端口',
     searchFields: [
       { label: 'IP', key: 'ip', operator: '=' },
-      // 🚨 核心修复：对齐后端的嵌套对象查询字段
       { label: '端口', key: 'port_info.port_id', operator: '=' },
+      { label: '服务名称', key: 'port_info.service_name', operator: '=' },
+      { label: '产品', key: 'port_info.product', operator: '=' },
       { label: '操作系统', key: 'os_info.name', operator: '=' },
       { label: '域名', key: 'domain', operator: '=' },
       { label: 'CDN', key: 'cdn_name', operator: '=' },
+      { label: '城市地区', key: 'geo_city.region_name', operator: '=' },
       {
         label: 'IP类别',
         key: 'ip_type',
@@ -738,81 +1246,84 @@ const tabConfig = reactive({
           { label: 'PUBLIC (公网)', value: 'PUBLIC' },
           { label: 'PRIVATE (内网)', value: 'PRIVATE' }
         ]
-      }
+      },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
-      // ... 列配置保持不变 ...
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
-      { title: '操作系统', key: 'os_info', width: 150 },
-      { title: '开放端口', key: 'port_info', width: 200 },
-      { title: '关联域名', key: 'domain', width: 250 },
-      { title: 'CDN', dataIndex: 'cdn_name', key: 'cdn_name', width: 150 },
-      { title: 'Geo', key: 'geo_city', width: 180 },
-      { title: 'AS', key: 'geo_asn', width: 280 }
+      { title: 'IP', key: 'ip_col', width: 220 },
+      { title: '操作系统', key: 'os_info', width: 140 },
+      { title: '开放端口', key: 'port_info', width: 190 },
+      { title: '关联域名', key: 'domain', width: 240 },
+      { title: 'CDN', dataIndex: 'cdn_name', key: 'cdn_name', width: 130 },
+      { title: 'Geo', key: 'geo_city', width: 170 },
+      { title: 'AS', key: 'geo_asn', width: 250 }
     ]
   },
-  // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
+
   cert: {
     url: '/cert/',
     searchFields: [
       { label: 'IP字段', key: 'ip', operator: '=' },
+      { label: '端口', key: 'port', operator: '=' },
       { label: '签发者名称', key: 'cert.issuer_dn', operator: '=' },
       { label: '主题名称', key: 'cert.subject_dn', operator: '=' },
       { label: 'SHA-1', key: 'cert.fingerprint.sha1', operator: '=' },
-      { label: '使用者备用名称', key: 'cert.extensions.subjectAltName', operator: '=' }
+      { label: '使用者备用名称', key: 'cert.extensions.subjectAltName', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: 'HOST', key: 'host', width: 180 },
-      { title: 'CERT', key: 'cert_detail', width: 900 } // 留出巨大的空间给卡片
+      { title: 'HOST', key: 'cert_host_col', width: 220 },
+      { title: 'CERT', key: 'cert_detail', width: 850 }
     ]
   },
 
-  // 💡 新增：服务 Tab 的 1:1 配置
   service: {
     url: '/service/',
-    // 🚨 故意不写 exportUrl，完美对齐原版不带导出功能的 UI
     searchFields: [
       { label: '服务', key: 'service_name', operator: '=' },
       { label: 'IP', key: 'service_info.ip', operator: '=' },
       { label: '端口', key: 'service_info.port_id', operator: '=' },
-      { label: '产品', key: 'service_info.product', operator: '=' }
+      { label: '产品', key: 'service_info.product', operator: '=' },
+      { label: '版本', key: 'service_info.version', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '服务', dataIndex: 'service_name', key: 'service_name', width: 150, align: 'center' },
-      { title: 'IP端口', key: 'ip_port', width: 300 },
+      { title: '服务', key: 'service_col', width: 220 },
+      { title: 'IP端口', key: 'ip_port', width: 280 },
       { title: 'Product', key: 'product', width: 250 }
     ]
   },
 
-  // 💡 新增：文件泄露 Tab 的 1:1 配置
   fileleak: {
     url: '/fileleak/',
-    // 🚨 同样不配置 exportUrl，隐身导出按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
+      { label: '来源站点', key: 'site', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
       { label: '状态码', key: 'status_code', operator: '=' },
-      { label: 'body 长度', key: 'content_length', operator: '=' }
+      { label: 'body 长度', key: 'content_length', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: 'URL', key: 'fileleak_url', width: 500 }, // 用专属 key 渲染超链接
-      { title: '标题', dataIndex: 'title', key: 'title', width: 250 },
-      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
-      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
+      { title: 'URL', key: 'fileleak_url_col', width: 450 },
+      { title: '标题', dataIndex: 'title', key: 'title', width: 220 },
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 90, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 110, align: 'center' }
     ]
   },
 
-  // 💡 新增：URL信息 Tab 的 1:1 配置
   url: {
     url: '/url/',
-    exportUrl: '/url/export/', // 恢复导出接口
-    exportName: 'URL信息',     // 自动生成“导出URL信息”按钮
+    exportUrl: '/url/export/',
+    exportName: 'URL信息',
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
+      { label: '来源站点', key: 'site', operator: '=' },
+      { label: '根域名', key: 'fld', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
       { label: '状态码', key: 'status_code', operator: '=' },
       { 
@@ -835,103 +1346,115 @@ const tabConfig = reactive({
           { label: 'Fuzz', value: 'fuzz' }
         ],
         operator: '=' 
-      }
+      },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: 'URL', key: 'url_link', width: 450 }, // 专用 key 渲染超链接
+      { title: 'URL', key: 'url_link_col', width: 420 },
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
-      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
-      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
-      { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 90, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 110, align: 'center' },
+      { title: '来源', dataIndex: 'source', key: 'source', width: 140 }
     ]
   },
 
-  // 💡 新增：风险 Tab 的 1:1 配置
   vuln: {
     url: '/vuln/',
-    // 🚨 截图显示无导出按钮，所以不配置 exportUrl
     searchFields: [
       { label: '漏洞名称', key: 'vul_name', operator: '=' },
-      { label: '类别', key: 'vul_category', operator: '=' }, // ARL 常用的类别字段名
+      { label: '类别', key: 'vul_category', operator: '=' },
       { label: '应用名', key: 'app_name', operator: '=' },
-      { label: '目标', key: 'target', operator: '=' }
+      { label: '目标', key: 'target', operator: '=' },
+      { label: '插件名', key: 'plg_name', operator: '=' },
+      { label: '漏洞URL', key: 'vuln_url', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '漏洞名称', dataIndex: 'vul_name', key: 'vul_name', width: 250 },
-      { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 120 },
-      { title: '应用名', dataIndex: 'app_name', key: 'app_name', width: 150 },
-      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
-      { title: '凭证', key: 'verify_data', width: 350 }, // 凭证通常较长，用插槽渲染
+      { title: '漏洞名称', key: 'vuln_col', width: 260 },
+      { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 110 },
+      { title: '应用名', dataIndex: 'app_name', key: 'app_name', width: 140 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 190 },
+      { title: '凭证', key: 'verify_data', width: 330 },
       { title: '发现时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
     ]
   },
 
-  // 💡 新增：服务(python) Tab 的 1:1 配置
   npoc_service: {
     url: '/npoc_service/',
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { label: '协议', key: 'protocol', operator: '=' },
       { label: '主机', key: 'host', operator: '=' },
       { label: '端口', key: 'port', operator: '=' },
-      { label: '目标', key: 'target', operator: '=' }
+      { label: '目标', key: 'target', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 150 },
-      { title: '主机', dataIndex: 'host', key: 'host', width: 200 },
-      { title: '端口', dataIndex: 'port', key: 'port', width: 100, align: 'center' },
-      { title: '目标', dataIndex: 'target', key: 'target', width: 250 },
-      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+      { title: '目标', key: 'npoc_target_col', width: 250 },
+      { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 120 },
+      { title: '主机', dataIndex: 'host', key: 'host', width: 170 },
+      { title: '端口', dataIndex: 'port', key: 'port', width: 90, align: 'center' },
+      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 170 }
     ]
   },
 
-  // 💡 新增：C段 Tab 的 1:1 配置
   cip: {
     url: '/cip/',
-    exportUrl: '/cip/export/', // 恢复导出接口
-    exportName: 'C段',         // 自动生成“导出C段”按钮
+    exportUrl: '/cip/export/',
+    exportName: 'C段',
     searchFields: [
-      { label: 'C段', key: 'cidr_ip', operator: '=' }
+      { label: 'C段', key: 'cidr_ip', operator: '=' },
+      { label: '包含IP', key: 'ip_list', operator: '=' },
+      { label: '包含域名', key: 'domain_list', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: 'C段', dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
-      { title: 'IP数', key: 'ip_count_col', width: 150, align: 'center' },
-      { title: '域名数', key: 'domain_count_col', width: 150, align: 'center' }
+      { title: 'C段', key: 'cidr_col', width: 260 },
+      { title: 'IP数', key: 'ip_count_col', width: 120, align: 'center' },
+      { title: '域名数', key: 'domain_count_col', width: 120, align: 'center' }
     ]
   },
 
-  // 💡 新增：nuclei Tab 的 1:1 配置
   nuclei_result: {
     url: '/nuclei_result/',
-    deleteUrl: '/asset_nuclei_result/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
+    deleteUrl: '/asset_nuclei_result/delete/',
     searchFields: [
       { label: '模版ID', key: 'template_id', operator: '=' },
       { label: '目标', key: 'target', operator: '=' },
       { label: '漏洞URL', key: 'vuln_url', operator: '=' },
-      { label: '漏洞名称', key: 'vuln_name', operator: '=' }
+      { label: '漏洞名称', key: 'vuln_name', operator: '=' },
+      {
+        label: '漏洞等级',
+        key: 'vuln_severity',
+        operator: '=',
+        type: 'select',
+        options: [
+          { label: 'critical (严重)', value: 'critical' },
+          { label: 'high (高危)', value: 'high' },
+          { label: 'medium (中危)', value: 'medium' },
+          { label: 'low (低危)', value: 'low' },
+          { label: 'info (信息)', value: 'info' }
+        ]
+      },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '模版ID', dataIndex: 'template_id', key: 'template_id', width: 180 },
-      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
-      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 300 }, // 用专用 key 渲染超链接
-      { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
-      { title: '漏洞等级', dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
+      { title: '模版/漏洞', key: 'nuclei_col', width: 250 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 190 },
+      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 280 },
+      { title: '漏洞等级', dataIndex: 'vuln_severity', key: 'vuln_severity', width: 90, align: 'center' },
       { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 },
-      { title: '验证命令', key: 'verify_command', width: 350 } // 命令可能很长，用插槽防撑破
+      { title: '验证命令', key: 'verify_command', width: 320 }
     ]
   },
 
-  // 💡 新增：指纹统计 Tab 的 1:1 配置
   stat_finger: {
     url: '/stat_finger/',
-    deleteUrl: '/asset_site/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
-    // 🚨 截图显示无导出按钮
+    deleteUrl: '/asset_site/delete/',
     searchFields: [
       { 
         label: 'finger', 
@@ -939,45 +1462,45 @@ const tabConfig = reactive({
         operator: '模糊匹配',
         hasOperatorSelect: true,
         operators: ['模糊匹配', '精确匹配']
-      } // 后端字段是 name
+      }
     ],
     cols: [
       { title: '序号', key: 'index', width: 80, align: 'center' },
-      { title: 'finger', key: 'finger_name', width: 500 }, // 用专用 key 渲染青蓝字体
+      { title: 'finger', key: 'finger_name', width: 500 },
       { title: '数量', dataIndex: 'cnt', key: 'cnt', width: 200 }
     ]
   },
 
-
-  // 💡 新增：WIH (Web Info Hunter) Tab 的 1:1 配置
-// 💡 修复：WIH (Web Info Hunter) Tab 配置
   wih: {
     url: '/wih/',
     exportUrl: '/wih/export/',
     exportName: 'WIH',
     searchFields: [
-      {
-        label: '记录类型',
-        key: 'record_type',
-        operator: '='
-      },
+      { label: '记录类型', key: 'record_type', operator: '=' },
       { label: '内容', key: 'content', operator: '=' },
       { label: '来源 JS', key: 'source', operator: '=' },
-      { label: '来源站点', key: 'site', operator: '=' }
+      { label: '来源站点', key: 'site', operator: '=' },
+      { label: '标签', key: 'tag', operator: '=' }
     ],
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '记录类型', dataIndex: 'record_type', key: 'record_type', width: 120 },
-      { title: '内容', dataIndex: 'content', key: 'content', width: 250 },
-      { title: '来源 JS', key: 'wih_source', width: 450 },
-      { title: '来源站点', dataIndex: 'site', key: 'wih_site', width: 250 }
+      { title: '内容', key: 'wih_content_col', width: 280 },
+      { title: '记录类型', dataIndex: 'record_type', key: 'record_type', width: 110 },
+      { title: '来源 JS', key: 'wih_source', width: 400 },
+      { title: '来源站点', dataIndex: 'site', key: 'wih_site', width: 240 }
     ]
   }
 });
 
 const columns = ref(tabConfig.site.cols);
 
-// 🚨 核心逻辑调整：去掉 task_id 参数，纯净的全局搜索
+// 获取当前 Tab 专属的 Tag API 地址（全Tab通用路由）
+const getTagApiUrl = (action) => {
+  const config = tabConfig[activeTab.value];
+  const baseUrl = (config?.url || `/${activeTab.value}/`).replace(/\/$/, '');
+  return `${baseUrl}/${action}/`;
+};
+
 const fetchData = async () => {
   const config = tabConfig[activeTab.value];
   if (!config) return;
@@ -985,6 +1508,12 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const params = { page: pagination.current, size: pagination.pageSize };
+
+    // 任务筛选联动
+    if (selectedTaskIds.value && selectedTaskIds.value.length > 0) {
+      params.task_id = selectedTaskIds.value.join(',');
+    }
+
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
       params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
@@ -1022,6 +1551,11 @@ const handleExport = async () => {
   try {
     message.loading({ content: `正在生成${config.exportName}导出文件...`, key: 'export_data' });
     const params = { page: 1, size: 100000 };
+
+    if (selectedTaskIds.value && selectedTaskIds.value.length > 0) {
+      params.task_id = selectedTaskIds.value.join(',');
+    }
+
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
       params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
@@ -1057,7 +1591,13 @@ const handleExport = async () => {
 };
 
 const onSearch = () => { pagination.current = 1; fetchData(); };
-const resetSearch = () => { searchForm.value = {}; dateRange.value = null; quickDay.value = null; onSearch(); };
+const resetSearch = () => {
+  searchForm.value = {};
+  selectedTaskIds.value = [];
+  dateRange.value = null;
+  quickDay.value = null;
+  onSearch();
+};
 const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
 
 watch(activeTab, (newVal) => {
@@ -1072,23 +1612,28 @@ watch(activeTab, (newVal) => {
 });
 
 onMounted(() => {
-  // Read query parameters to set initial tab and search form
   if (route.query.tab && tabConfig[route.query.tab]) {
     activeTab.value = route.query.tab;
     columns.value = tabConfig[route.query.tab].cols;
   }
   
-  // Set search form values from query parameters if they exist
+  if (route.query.task_id) {
+    if (Array.isArray(route.query.task_id)) {
+      selectedTaskIds.value = route.query.task_id;
+    } else {
+      selectedTaskIds.value = route.query.task_id.split(',').filter(Boolean);
+    }
+  }
+
   for (const key in route.query) {
-    if (key !== 'tab') {
+    if (key !== 'tab' && key !== 'task_id') {
       searchForm.value[key] = route.query[key];
     }
   }
   
+  loadTaskOptions();
   fetchData();
 });
-
-
 
 // 风险任务下发 (全局模式)
 const riskVisible = ref(false);
@@ -1109,7 +1654,10 @@ const openRiskModal = async () => {
 
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
-    const setParams = { ...searchForm.value }; // 全局模式直接传搜索参数
+    const setParams = { ...searchForm.value };
+    if (selectedTaskIds.value && selectedTaskIds.value.length > 0) {
+      setParams.task_id = selectedTaskIds.value.join(',');
+    }
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       setParams.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
       setParams.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
@@ -1149,11 +1697,7 @@ const submitRiskTask = async () => {
   finally { riskSubmitLoading.value = false; }
 };
 
-// 标签管理逻辑
-const tagVisible = ref(false);
-const tagSubmitLoading = ref(false);
-
-// C段详情弹窗 (提取为组件)
+// C段详情弹窗
 const cipDetailModalVisible = ref(false);
 const currentCidrRecord = ref(null);
 
@@ -1161,8 +1705,6 @@ const openCidrDetail = (record) => {
   currentCidrRecord.value = record;
   cipDetailModalVisible.value = true;
 };
-
-
 
 // 常用标签与自定义标签系统
 const DEFAULT_TAGS = ['入口', '重点', '后台'];
@@ -1226,10 +1768,10 @@ const updateLocalRecordTag = (record, tag, action) => {
 
 const toggleTag = async (record, tag) => {
   const isPresent = hasTag(record, tag);
-  const siteId = record._id || record.id;
+  const recordId = record._id || record.id;
   try {
     if (isPresent) {
-      const res = await request.post('/site/delete_tag/', { _id: siteId, tag });
+      const res = await request.post(getTagApiUrl('delete_tag'), { _id: recordId, tag });
       if (res.code === 200) {
         message.success(`已移除标签「${tag}」`);
         updateLocalRecordTag(record, tag, 'remove');
@@ -1237,7 +1779,7 @@ const toggleTag = async (record, tag) => {
         message.error(res.message || '移除标签失败');
       }
     } else {
-      const res = await request.post('/site/add_tag/', { _id: siteId, tag });
+      const res = await request.post(getTagApiUrl('add_tag'), { _id: recordId, tag });
       if (res.code === 200) {
         message.success(`已添加标签「${tag}」`);
         updateLocalRecordTag(record, tag, 'add');
@@ -1253,7 +1795,7 @@ const toggleTag = async (record, tag) => {
 const handleRemoveTag = async (record, tag) => {
   const tagStr = typeof tag === 'string' ? tag : (tag.name || tag.tag_name || tag);
   try {
-    const res = await request.post('/site/delete_tag/', {
+    const res = await request.post(getTagApiUrl('delete_tag'), {
       _id: record._id || record.id,
       tag: tagStr
     });
@@ -1273,9 +1815,9 @@ const handleAddNewCustomTag = async (record) => {
   if (!val) {
     return message.warning('标签名称不能为空');
   }
-  const siteId = record._id || record.id;
+  const recordId = record._id || record.id;
   try {
-    const res = await request.post('/site/add_tag/', { _id: siteId, tag: val });
+    const res = await request.post(getTagApiUrl('add_tag'), { _id: recordId, tag: val });
     if (res.code === 200) {
       message.success(`已添加标签「${val}」`);
       updateLocalRecordTag(record, val, 'add');
@@ -1319,7 +1861,6 @@ const handleQuickTagFilter = (tag) => {
 .site-img { width: 16px; height: 16px; margin-right: 8px; vertical-align: middle; }
 .site-word { color: var(--arl-text-color) !important; font-size: 14px !important; margin-top: 4px; margin-bottom: 0; line-height: 1.5; }
 .add-tag { color: var(--arl-text-color); cursor: pointer; font-size: 12px; margin-left: 8px; border: 1px dashed var(--arl-border-color); padding: 0 7px; border-radius: 2px; background: var(--arl-bg-light); transition: all 0.3s; }
-.add-tag:hover {  }
 .mt5 { margin-top: 5px; }
 
 .search-row { display: flex; flex-wrap: wrap; gap: 16px 24px; }
@@ -1335,7 +1876,6 @@ const handleQuickTagFilter = (tag) => {
 
 :deep(.ant-tabs-card-bar .ant-tabs-tab) { border-radius: 2px 2px 0 0 !important; margin-right: 4px !important; border: 1px solid var(--arl-border-color) !important; background: var(--arl-bg-light) !important; transition: all 0.3s; }
 :deep(.ant-tabs-card-bar .ant-tabs-tab-active) { background: var(--arl-bg-white) !important; border-bottom-color: transparent !important;  font-weight: 500; }
-:deep(.ant-tabs-tab:hover) {  }
 
 .quick-tag-btn {
   font-size: 12px;
@@ -1355,5 +1895,4 @@ const handleQuickTagFilter = (tag) => {
   color: #ff7a45;
   border-color: #ffbb96;
 }
-
 </style>

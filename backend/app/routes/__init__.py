@@ -233,6 +233,21 @@ class ARLResource(Resource):
                 }
                 query_args[actual_key] = raw_value
 
+            # __in 代表 MongoDB $in 查询
+            elif key.endswith("__in"):
+                real_key = key.split('__in')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                if isinstance(args[key], str):
+                    in_vals = [x.strip() for x in args[key].split(',') if x.strip()]
+                elif isinstance(args[key], (list, tuple, set)):
+                    in_vals = [str(x).strip() for x in args[key] if str(x).strip()]
+                else:
+                    in_vals = [args[key]]
+                if len(in_vals) == 1:
+                    query_args[actual_key] = in_vals[0]
+                elif len(in_vals) > 1:
+                    query_args[actual_key] = {"$in": in_vals}
+
             # __eq 代表 completely equal (完全等于/精确匹配)
             elif key.endswith("__eq"):
                 real_key = key.split('__eq')[0]
@@ -268,9 +283,16 @@ class ARLResource(Resource):
             elif isinstance(args[key], str):
                 actual_key = getattr(self, "query_field_map", {}).get(key, key)
                 
-                # 如果是设定好的必须绝对相等的字段（比如 task_id），直接赋值
+                # 如果是设定好的必须绝对相等的字段（比如 task_id），直接赋值或多任务 $in 查询
                 if key in EQUAL_FIELDS:
-                    query_args[actual_key] = args[key]
+                    if key == "task_id" and ("," in args[key] or isinstance(args[key], (list, tuple, set))):
+                        ids = [x.strip() for x in args[key].split(",") if x.strip()] if isinstance(args[key], str) else [str(x).strip() for x in args[key] if str(x).strip()]
+                        if len(ids) == 1:
+                            query_args[actual_key] = ids[0]
+                        elif len(ids) > 1:
+                            query_args[actual_key] = {"$in": ids}
+                    else:
+                        query_args[actual_key] = args[key]
                 else:
                     # 否则，一律默认变成“模糊搜索”（使用正则表达式 $regex，且忽略大小写 $options: "i"）
                     query_args[actual_key] = {
@@ -280,7 +302,15 @@ class ARLResource(Resource):
 
             # 6. 其他类型（比如布尔值 True/False，或者普通的整数等），直接照搬
             else:
-                query_args[key] = args[key]
+                if key == "task_id" and isinstance(args[key], (list, tuple, set)):
+                    ids = [str(x).strip() for x in args[key] if str(x).strip()]
+                    actual_key = getattr(self, "query_field_map", {}).get(key, key)
+                    if len(ids) == 1:
+                        query_args[actual_key] = ids[0]
+                    elif len(ids) > 1:
+                        query_args[actual_key] = {"$in": ids}
+                else:
+                    query_args[key] = args[key]
 
         # 返回翻译好的指令书，交给 MongoDB 数据库去执行
         return query_args
@@ -760,5 +790,169 @@ from .assetCip import ns as asset_cip_ns
 from .assetNucleiResult import ns as asset_nuclei_result_ns
 from .assetStatFinger import ns as asset_stat_finger_ns
 from .mcp import ns as mcp_ns
+
+
+# ==============================================================================
+# 全资产模块通用标签（Tag）体系与检索能力增强注入
+# ==============================================================================
+from app.modules import ErrorMsg
+from app.utils import auth
+from app import utils
+
+# 更新字段查询映射，兼容常用别名
+ARLResource.query_field_map.update({
+    "protocol": "scheme"
+})
+
+def _register_asset_tag_and_search_features():
+    """
+    为所有资产命名空间自动注册 /add_tag/ 和 /delete_tag/ 接口，
+    并为查询与导出解析器动态注入 tag 及增强检索字段。
+    """
+    configs = [
+        (domain_ns, 'domain', 'domain', 'asset_domain'),
+        (ip_ns, 'ip', 'ip', 'asset_ip'),
+        (cert_ns, 'cert', 'cert', 'asset_cert'),
+        (service_ns, 'service', 'service', 'asset_service'),
+        (fileleak_ns, 'fileleak', 'fileleak', 'asset_fileleak'),
+        (url_ns, 'url', 'url', 'asset_url'),
+        (vuln_ns, 'vuln', 'vuln', 'asset_vuln'),
+        (npoc_service_ns, 'npoc_service', 'npoc_service', 'asset_npoc_service'),
+        (cip_ns, 'cip', 'cip', 'asset_cip'),
+        (nuclei_result_ns, 'nuclei_result', 'nuclei_result', 'asset_nuclei_result'),
+        (wih_ns, 'wih', 'wih', 'asset_wih'),
+        (asset_domain_ns, 'assetDomain', 'asset_domain', 'domain'),
+        (asset_ip_ns, 'assetIP', 'asset_ip', 'ip'),
+        (asset_cert_ns, 'assetCert', 'asset_cert', 'cert'),
+        (asset_service_ns, 'assetService', 'asset_service', 'service'),
+        (asset_fileleak_ns, 'assetFileleak', 'asset_fileleak', 'fileleak'),
+        (asset_url_ns, 'assetUrl', 'asset_url', 'url'),
+        (asset_vuln_ns, 'assetVuln', 'asset_vuln', 'vuln'),
+        (asset_npoc_service_ns, 'assetNpocService', 'asset_npoc_service', 'npoc_service'),
+        (asset_cip_ns, 'assetCip', 'asset_cip', 'cip'),
+        (asset_nuclei_result_ns, 'assetNucleiResult', 'asset_nuclei_result', 'nuclei_result'),
+        (asset_wih_ns, 'assetWih', 'asset_wih', 'wih')
+    ]
+
+    for ns_obj, mod_name, primary_coll, fallback_coll in configs:
+        # 1. 动态注入 /add_tag/ 和 /delete_tag/ 路由
+        add_tag_fields = ns_obj.model(f'AddTagFields_{mod_name}', {
+            "tag": fields.String(required=True, description="添加标签"),
+            "_id": fields.String(description="资产ID", required=True)
+        })
+
+        delete_tag_fields = ns_obj.model(f'DeleteTagFields_{mod_name}', {
+            "tag": fields.String(required=True, description="删除标签"),
+            "_id": fields.String(description="资产ID", required=True)
+        })
+
+        def _build_tag_handlers(_primary, _fallback, _add_model, _del_model):
+            class DynamicAddTagARL(ARLResource):
+                @auth
+                @ns_obj.expect(_add_model)
+                def post(self):
+                    args = self.parse_args(_add_model)
+                    item_id = args.pop("_id")
+                    tag = args.pop("tag")
+
+                    query = {"_id": ObjectId(item_id)}
+                    target_coll = _primary
+                    data = utils.conn_db(target_coll).find_one(query)
+                    if not data and _fallback:
+                        target_coll = _fallback
+                        data = utils.conn_db(target_coll).find_one(query)
+                    if not data:
+                        return utils.build_ret(ErrorMsg.NotFound, {"_id": item_id})
+
+                    tag_list = []
+                    old_tag = data.get("tag")
+                    if old_tag:
+                        if isinstance(old_tag, str):
+                            tag_list.append(old_tag)
+                        elif isinstance(old_tag, list):
+                            tag_list.extend(old_tag)
+
+                    if tag in tag_list:
+                        return utils.build_ret(ErrorMsg.SiteTagIsExist, {"tag": tag})
+
+                    tag_list.append(tag)
+                    utils.conn_db(target_coll).update_one(query, {"$set": {"tag": tag_list}})
+                    return utils.build_ret(ErrorMsg.Success, {"tag": tag})
+
+            class DynamicDeleteTagARL(ARLResource):
+                @auth
+                @ns_obj.expect(_del_model)
+                def post(self):
+                    args = self.parse_args(_del_model)
+                    item_id = args.pop("_id")
+                    tag = args.pop("tag")
+
+                    query = {"_id": ObjectId(item_id)}
+                    target_coll = _primary
+                    data = utils.conn_db(target_coll).find_one(query)
+                    if not data and _fallback:
+                        target_coll = _fallback
+                        data = utils.conn_db(target_coll).find_one(query)
+                    if not data:
+                        return utils.build_ret(ErrorMsg.NotFound, {"_id": item_id})
+
+                    tag_list = []
+                    old_tag = data.get("tag")
+                    if old_tag:
+                        if isinstance(old_tag, str):
+                            tag_list.append(old_tag)
+                        elif isinstance(old_tag, list):
+                            tag_list.extend(old_tag)
+
+                    if tag not in tag_list:
+                        return utils.build_ret(ErrorMsg.SiteTagNotExist, {"tag": tag})
+
+                    tag_list.remove(tag)
+                    utils.conn_db(target_coll).update_one(query, {"$set": {"tag": tag_list}})
+                    return utils.build_ret(ErrorMsg.Success, {"tag": tag})
+
+            return DynamicAddTagARL, DynamicDeleteTagARL
+
+        add_cls, del_cls = _build_tag_handlers(primary_coll, fallback_coll, add_tag_fields, delete_tag_fields)
+        try:
+            ns_obj.add_resource(add_cls, '/add_tag/')
+            ns_obj.add_resource(del_cls, '/delete_tag/')
+        except Exception as e:
+            logger.warning(f"Error registering tag routes on {mod_name}: {e}")
+
+        # 2. 动态向模块的查询解析器与导出解析器添加 tag 及其它增强字段
+        try:
+            import sys
+            mod = sys.modules.get(f'app.routes.{mod_name}')
+            if mod:
+                if hasattr(mod, 'base_search_fields'):
+                    mod.base_search_fields['tag'] = fields.String(description="标签列表")
+                for attr_name in dir(mod):
+                    attr = getattr(mod, attr_name)
+                    if isinstance(attr, type) and issubclass(attr, ARLResource) and hasattr(attr, 'parser') and attr.parser:
+                        existing_arg_names = {a.name for a in attr.parser.args}
+                        if 'tag' not in existing_arg_names:
+                            attr.parser.add_argument('tag', type=str, location='args', required=False)
+                        if 'task_id' not in existing_arg_names:
+                            attr.parser.add_argument('task_id', type=str, location='args', required=False)
+                        # 特定模块增强字段
+                        if mod_name in ('domain', 'assetDomain') and 'fld' not in existing_arg_names:
+                            attr.parser.add_argument('fld', type=str, location='args', required=False)
+                        elif mod_name in ('cert', 'assetCert') and 'port' not in existing_arg_names:
+                            attr.parser.add_argument('port', type=int, location='args', required=False)
+                        elif mod_name in ('vuln', 'assetVuln') and 'vuln_url' not in existing_arg_names:
+                            attr.parser.add_argument('vuln_url', type=str, location='args', required=False)
+                        elif mod_name in ('npoc_service', 'assetNpocService') and 'protocol' not in existing_arg_names:
+                            attr.parser.add_argument('protocol', type=str, location='args', required=False)
+                        elif mod_name in ('cip', 'assetCip'):
+                            if 'ip_list' not in existing_arg_names:
+                                attr.parser.add_argument('ip_list', type=str, location='args', required=False)
+                            if 'domain_list' not in existing_arg_names:
+                                attr.parser.add_argument('domain_list', type=str, location='args', required=False)
+        except Exception as e:
+            logger.warning(f"Error enhancing parser for {mod_name}: {e}")
+
+_register_asset_tag_and_search_features()
+
 
 
