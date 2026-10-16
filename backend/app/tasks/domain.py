@@ -464,20 +464,23 @@ class DomainTask(CommonTask):
         self.wih_domain_set = set()  # 通过调用 WebInfoHunter 获取的域名集合
 
         scan_port_map = {
-            "test": ScanPortType.TEST,
-            "top100": ScanPortType.TOP100,
-            "top1000": ScanPortType.TOP1000,
-            "all": ScanPortType.ALL,
-            "custom": ScanPortType.CUSTOM
+            "test": getattr(ScanPortType, "TEST", getattr(ScanPortType, "TOP100", "top100")),
+            "top100": getattr(ScanPortType, "TOP100", "top100"),
+            "top1000": getattr(ScanPortType, "TOP1000", "top1000"),
+            "all": getattr(ScanPortType, "ALL", "all"),
+            "custom": getattr(ScanPortType, "CUSTOM", "custom")
         }
-        option_scan_port_type = self.options.get("port_scan_type", "test")
+        option_scan_port_type = str(self.options.get("port_scan_type", "top100")).lower()
         
         # 兼容原本逻辑：如果是 custom 类型，用户传了自定义端口字符串，优先使用用户传的。否则用字典里的 custom 端口
         if option_scan_port_type == "custom" and self.options.get("port_custom"):
             actual_ports = self.options.get("port_custom")
         else:
-            mapped_type = scan_port_map.get(option_scan_port_type, ScanPortType.TEST)
-            actual_ports = get_scan_ports(mapped_type)
+            mapped_type = scan_port_map.get(option_scan_port_type, getattr(ScanPortType, "TOP100", "top100"))
+            try:
+                actual_ports = get_scan_ports(mapped_type)
+            except Exception:
+                actual_ports = "80,443,8080,8443"
 
         scan_port_option = {
             "ports": actual_ports,
