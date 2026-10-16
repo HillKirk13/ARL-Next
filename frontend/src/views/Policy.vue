@@ -159,6 +159,7 @@ const getDomainIpConfigText = (p) => {
   if (p.domain_config?.alt_dns) l.push('DNS字典智能生成');
   if (p.domain_config?.arl_search) l.push('ARL历史查询');
   if (p.domain_config?.dns_query_plugin) l.push('域名查询插件');
+  if (p.domain_config?.multi_level_subdomain) l.push('多级子域名收集');
   if (p.ip_config?.port_scan) l.push('端口扫描');
   if (p.ip_config?.service_detection) l.push('服务识别');
   if (p.ip_config?.os_detection) l.push('操作系统识别');

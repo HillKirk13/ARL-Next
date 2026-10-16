@@ -45,6 +45,8 @@ services:
       - ./backend/app/utils/user.py:/code/backend/app/utils/user.py
       - ./backend/app/routes/user.py:/code/backend/app/routes/user.py
       - ./backend/app/routes/__init__.py:/code/backend/app/routes/__init__.py
+      - ./backend/app/routes/policy.py:/code/backend/app/routes/policy.py
+      - ./backend/app/routes/task.py:/code/backend/app/routes/task.py
       - ./backend/app/routes/site.py:/code/backend/app/routes/site.py
       - ./backend/app/routes/assetSite.py:/code/backend/app/routes/assetSite.py
       - ./backend/app/routes/dictionary.py:/code/backend/app/routes/dictionary.py
@@ -107,6 +109,10 @@ services:
     working_dir: /code
     volumes:
       - ./backend/app/services/portScan.py:/code/backend/app/services/portScan.py
+      - ./backend/app/tasks/domain.py:/code/backend/app/tasks/domain.py
+      - ./backend/app/services/multi_level_subdomain.py:/code/backend/app/services/multi_level_subdomain.py
+      - ./backend/app/services/__init__.py:/code/backend/app/services/__init__.py
+      - ./backend/app/tools/domain_all:/code/backend/tools/domain_all
       - arl_screenshots:/code/backend/app/tmp_screenshot
       - arl_app_dicts:/code/backend/app/dicts
       - arl_poc_plugins:/code/backend/ARL-NPoC/xing/plugins

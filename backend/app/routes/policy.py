@@ -41,7 +41,8 @@ domain_config_fields = ns.model('domainConfig', {
     "domain_brute_type": fields.String(description="域名爆破类型(big)", example="big"),
     "alt_dns": fields.Boolean(description="DNS字典智能生成", default=True),
     "arl_search": fields.Boolean(description="ARL 历史查询", default=True),
-    "dns_query_plugin": fields.Boolean(description="域名插件查询", default=False)
+    "dns_query_plugin": fields.Boolean(description="域名插件查询", default=False),
+    "multi_level_subdomain": fields.Boolean(description="多级子域名收集", default=False)
 })
 
 '''IP 相关配置选项'''

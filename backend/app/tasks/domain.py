@@ -675,6 +675,48 @@ class DomainTask(CommonTask):
 
         self.domain_info_list.extend(alt_domain_info_list)
 
+    def multi_level_subdomain(self):
+        """
+        多级子域名深度挖掘
+        自动导入已有子域与历史子域作为种子，通过 alterx 智能变异并调用 puredns 进行全球分布式防封解析与泛解析过滤
+        """
+        try:
+            from app.services.multi_level_subdomain import MultiLevelSubdomainEngine
+            engine = MultiLevelSubdomainEngine(
+                base_domain=self.base_domain,
+                current_domains=[x.domain for x in self.domain_info_list],
+                task_id=self.task_id,
+                import_history=True
+            )
+            live_domains = engine.run()
+            if not live_domains:
+                logger.info("multi_level_subdomain returned no live domains for {}".format(self.base_domain))
+                return
+
+            logger.info("multi_level_subdomain resolving {} domains for {}".format(len(live_domains), self.base_domain))
+            resolver_map = services.resolver_domain(live_domains)
+            multi_domain_info_list = []
+            for domain, ips in resolver_map.items():
+                if ips:
+                    item = {
+                        "domain": domain,
+                        "type": "A",
+                        "record": ips,
+                        "ips": ips
+                    }
+                    multi_domain_info_list.append(modules.DomainInfo(**item))
+
+            if self.task_tag == "task":
+                multi_domain_info_list = self.clear_domain_info_by_record(multi_domain_info_list)
+                logger.info("multi_level_subdomain real result: {}".format(len(multi_domain_info_list)))
+                if len(multi_domain_info_list) > 0:
+                    self.save_domain_info_list(multi_domain_info_list, source="multi_level_subdomain")
+
+            self.domain_info_list.extend(multi_domain_info_list)
+            self.domain_info_list = list(set(self.domain_info_list))
+        except Exception as e:
+            logger.exception("Error in multi_level_subdomain: {}".format(e))
+
     def port_scan(self):
         ip_info_list = scan_port(self.domain_info_list, self.scan_port_option)
 
@@ -871,6 +913,14 @@ class DomainTask(CommonTask):
             self.alt_dns()
             elapse = time.time() - t1
             self.update_services("alt_dns", elapse)
+
+        '''***多级子域名深度挖掘 (subfinder + alterx + puredns)***'''
+        if self.options.get("multi_level_subdomain"):
+            self.update_task_field("status", "multi_level_subdomain")
+            t1 = time.time()
+            self.multi_level_subdomain()
+            elapse = time.time() - t1
+            self.update_services("multi_level_subdomain", elapse)
 
     def start_ip_fetch(self):
         self.gen_ipv4_map()

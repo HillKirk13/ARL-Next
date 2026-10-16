@@ -249,6 +249,15 @@
       </a-form-item>
 
       <a-form-item :wrapper-col="{ offset: 3, span: 21 }" style="margin-top: 16px; margin-bottom: 0;">
+        <!-- 任务快捷扫描模式预设 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; background: rgba(24, 144, 255, 0.05); border: 1px dashed #1890ff; border-radius: 6px;">
+          <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">⚡️ 快捷扫描策略预设：</span>
+          <a-space size="small">
+            <a-button size="small" type="primary" ghost @click="applyQuickScreenshotMode">📷 仅存活探测与截图</a-button>
+            <a-button size="small" @click="applyFullReconMode">🌐 全面深度侦查</a-button>
+          </a-space>
+        </div>
+
         <div v-for="(category, catIndex) in pluginCategories" :key="catIndex" style="margin-bottom: 16px;">
           <div style="font-size: 14px; font-weight: 500; color: var(--arl-text-color); margin-bottom: 8px;">{{ category.title }}</div>
           <a-row :gutter="[16, 12]">
@@ -698,7 +707,8 @@ const pluginCategories = [
       { key: 'dns_query_plugin', label: '域名查询插件' },
       { key: 'domain_brute', label: '域名爆破' },
       { key: 'alt_dns', label: 'DNS字典智能生成' },
-      { key: 'arl_search', label: 'ARL 历史查询' }
+      { key: 'arl_search', label: 'ARL 历史查询' },
+      { key: 'multi_level_subdomain', label: '多级子域名收集' }
     ]
   },
   {
@@ -732,6 +742,7 @@ const pluginList = pluginCategories.flatMap(cat => cat.plugins);
 // === 2. 匹配截图的默认勾选状态 ===
 const defaultPlugins = {
   domain_brute: true, alt_dns: true, dns_query_plugin: true, arl_search: true,
+  multi_level_subdomain: false,
   port_scan: true, service_detection: false, os_detection: false, ssl_cert: false,
   skip_scan_cdn_ip: true, site_identify: false, search_engines: false, site_spider: false,
   file_leak: false, findvhost: false, nuclei_scan: false, web_info_hunter: false,
@@ -746,6 +757,40 @@ const formState = reactive({
   port_scan_type: "TOP100",
   ...defaultPlugins
 });
+
+// ⚡️ 快捷扫描策略预设：仅存活探测与截图
+const applyQuickScreenshotMode = () => {
+  formState.domain_brute = true;
+  formState.multi_level_subdomain = true;
+  formState.alt_dns = true;
+  formState.dns_query_plugin = true;
+  formState.arl_search = true;
+  formState.site_identify = true;
+  formState.site_capture = true;
+  formState.skip_scan_cdn_ip = true;
+
+  formState.port_scan = false;
+  formState.service_detection = false;
+  formState.os_detection = false;
+  formState.ssl_cert = false;
+  formState.search_engines = false;
+  formState.site_spider = false;
+  formState.file_leak = false;
+  formState.findvhost = false;
+  formState.nuclei_scan = false;
+  formState.web_info_hunter = false;
+  formState.npoc_service_detection = false;
+
+  message.success('已切换为【⚡️ 仅存活探测与截图】极速模式');
+};
+
+// 🌐 快捷扫描策略预设：全面深度侦查
+const applyFullReconMode = () => {
+  Object.assign(formState, defaultPlugins);
+  formState.multi_level_subdomain = true;
+  formState.port_scan = true;
+  message.info('已恢复【🌐 全面深度侦查】配置');
+};
 
 const showModal = () => { visible.value = true; };
 

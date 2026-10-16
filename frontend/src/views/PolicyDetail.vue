@@ -50,6 +50,7 @@
               <a-checkbox v-show="matchSearch('2. DNS字典智能生成', domainSearch)" v-model:checked="policyForm.domain_config.alt_dns">2. DNS字典智能生成</a-checkbox>
               <a-checkbox v-show="matchSearch('3. ARL 历史查询', domainSearch)" v-model:checked="policyForm.domain_config.arl_search">3. ARL 历史查询</a-checkbox>
               <a-checkbox v-show="matchSearch('4. 域名查询插件', domainSearch)" v-model:checked="policyForm.domain_config.dns_query_plugin">4. 域名查询插件</a-checkbox>
+              <a-checkbox v-show="matchSearch('多级子域名收集', domainSearch)" v-model:checked="policyForm.domain_config.multi_level_subdomain">多级子域名收集</a-checkbox>
               <a-checkbox v-show="matchSearch('5. 端口扫描', domainSearch)" v-model:checked="policyForm.ip_config.port_scan">5. 端口扫描</a-checkbox>
               <a-checkbox v-show="matchSearch('6. 服务识别', domainSearch)" v-model:checked="policyForm.ip_config.service_detection">6. 服务识别</a-checkbox>
               <a-checkbox v-show="matchSearch('7. 操作系统识别', domainSearch)" v-model:checked="policyForm.ip_config.os_detection">7. 操作系统识别</a-checkbox>
@@ -168,7 +169,7 @@ const submitLoading = ref(false);
 
 const initPolicyForm = () => ({
   name: '', desc: '',
-  domain_config: { domain_brute: false, alt_dns: false, arl_search: false, dns_query_plugin: false, domain_brute_type: 'big' },
+  domain_config: { domain_brute: false, alt_dns: false, arl_search: false, dns_query_plugin: false, multi_level_subdomain: false, domain_brute_type: 'big' },
   ip_config: { port_scan: false, service_detection: false, os_detection:false, ssl_cert: false, skip_scan_cdn_ip: false, port_scan_type: 'top100', port_custom: '', host_timeout_type: 'default', host_timeout: 0, port_parallelism: 32, port_min_rate: 60, exclude_ports: '' },
   npoc_service_detection: false,
   site_config: { site_identify: false, search_engines: false, site_spider: false, findvhost: false, nuclei_scan: false, web_info_hunter: false },
@@ -225,7 +226,7 @@ const matchSearch = (text, keyword) => {
 const isAllDomainSelected = computed(() => {
   const dc = policyForm.domain_config;
   const ic = policyForm.ip_config;
-  return dc.domain_brute && dc.alt_dns && dc.arl_search && dc.dns_query_plugin &&
+  return dc.domain_brute && dc.alt_dns && dc.arl_search && dc.dns_query_plugin && dc.multi_level_subdomain &&
       ic.port_scan && ic.service_detection && ic.os_detection && ic.ssl_cert && ic.skip_scan_cdn_ip &&
       policyForm.npoc_service_detection;
 });
@@ -233,7 +234,7 @@ const toggleAllDomain = (e) => {
   const val = e.target.checked;
   const dc = policyForm.domain_config;
   const ic = policyForm.ip_config;
-  dc.domain_brute = dc.alt_dns = dc.arl_search = dc.dns_query_plugin = val;
+  dc.domain_brute = dc.alt_dns = dc.arl_search = dc.dns_query_plugin = dc.multi_level_subdomain = val;
   ic.port_scan = ic.service_detection = ic.os_detection = ic.ssl_cert = ic.skip_scan_cdn_ip = val;
   policyForm.npoc_service_detection = val;
 };

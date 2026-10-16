@@ -312,6 +312,10 @@ class ARLResource(Resource):
                 else:
                     query_args[key] = args[key]
 
+        # 特殊快捷过滤: 只看有截图的存活站点
+        if args.get('has_screenshot') in [True, 'true', '1', 1]:
+            query_args['screenshot'] = {'$nin': [None, '', False]}
+
         # 返回翻译好的指令书，交给 MongoDB 数据库去执行
         return query_args
 
@@ -944,6 +948,9 @@ def _register_asset_tag_and_search_features():
                             attr.parser.add_argument('vuln_url', type=str, location='args', required=False)
                         elif mod_name in ('npoc_service', 'assetNpocService') and 'protocol' not in existing_arg_names:
                             attr.parser.add_argument('protocol', type=str, location='args', required=False)
+                        elif mod_name in ('site', 'assetSite'):
+                            if 'has_screenshot' not in existing_arg_names:
+                                attr.parser.add_argument('has_screenshot', type=str, location='args', required=False)
                         elif mod_name in ('cip', 'assetCip'):
                             if 'ip_list' not in existing_arg_names:
                                 attr.parser.add_argument('ip_list', type=str, location='args', required=False)

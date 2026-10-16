@@ -181,8 +181,23 @@
 
     <div style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
       <a-button style="margin-right: 8px;" @click="resetSearch">清 除</a-button>
-      <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="margin-right: 8px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
       <a-button v-if="activeTab === 'site'" type="primary" style="margin-right: 8px;" @click="openRiskModal">风险任务下发</a-button>
+
+      <!-- 站点 Tab 独享: 只看有截图与视图切换 -->
+      <template v-if="activeTab === 'site'">
+        <a-button
+          :type="onlyScreenshot ? 'primary' : 'default'"
+          style="margin-right: 8px;"
+          @click="toggleOnlyScreenshot"
+        >
+          📷 {{ onlyScreenshot ? '已开启仅看有截图' : '仅看有截图' }}
+        </a-button>
+
+        <a-radio-group v-model:value="siteViewMode" size="middle" style="margin-right: 8px;">
+          <a-radio-button value="table">📋 表格视图</a-radio-button>
+          <a-radio-button value="gallery">🖼️ 截图画廊</a-radio-button>
+        </a-radio-group>
+      </template>
 
       <!-- 当前选中任务药丸反馈 -->
       <div v-if="selectedTaskInfos && selectedTaskInfos.length > 0" style="display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-right: 8px;">
@@ -248,6 +263,7 @@
     </div>
 
     <a-table
+        v-if="!(activeTab === 'site' && siteViewMode === 'gallery')"
         :loading="loading"
         :dataSource="dataSource"
         :columns="columns"
@@ -959,6 +975,102 @@
       </template>
     </a-table>
 
+    <!-- 站点 Tab 截图画廊视图 -->
+    <div v-else-if="activeTab === 'site' && siteViewMode === 'gallery'" style="min-height: 350px;">
+      <a-spin :spinning="loading">
+        <div v-if="dataSource && dataSource.length > 0" class="gallery-grid">
+          <div v-for="record in dataSource" :key="record._id || record.id" class="gallery-card">
+            <!-- 截图封面区域 -->
+            <div class="gallery-cover" @click="record.screenshot ? handlePreview(`/api${record.screenshot}`) : null">
+              <img
+                v-if="record.screenshot"
+                :src="`/api${record.screenshot}`"
+                loading="lazy"
+                class="gallery-img"
+              />
+              <div v-else class="gallery-no-img">
+                <picture-outlined style="font-size: 32px; opacity: 0.35; margin-bottom: 6px;" />
+                <span>暂无截图</span>
+              </div>
+              <!-- 放大镜提示遮罩 -->
+              <div v-if="record.screenshot" class="gallery-zoom-overlay">
+                <zoom-in-outlined style="font-size: 18px; margin-right: 6px;" />
+                <span>查看大图</span>
+              </div>
+              <!-- 状态码徽章 -->
+              <div v-if="record.status_code" class="gallery-status-badge" :class="getStatusBadgeClass(record.status_code)">
+                {{ record.status_code }}
+              </div>
+            </div>
+
+            <!-- 卡片信息区域 -->
+            <div class="gallery-info">
+              <!-- 站点链接与 Favicon -->
+              <div class="gallery-site-title">
+                <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
+                <img v-else-if="typeof record.favicon === 'string'" :src="`data:image/png;base64,${record.favicon}`" class="site-img" />
+                <a :href="record.site || record.url" target="_blank" class="gallery-url" :title="record.site || record.url">
+                  {{ record.site || record.url }}
+                </a>
+              </div>
+
+              <!-- 网站标题 -->
+              <div class="gallery-title-text" :title="record.title || '（无标题）'">
+                {{ record.title || '（无标题）' }}
+              </div>
+
+              <!-- 指纹标签 -->
+              <div v-if="record.finger && record.finger.length > 0" class="gallery-finger-row">
+                <a-tag v-for="(fg, fidx) in record.finger.slice(0, 3)" :key="fidx" color="blue" style="font-size: 11px; margin: 0 4px 4px 0;">
+                  {{ fg.name || fg }}
+                </a-tag>
+                <span v-if="record.finger.length > 3" style="font-size: 11px; opacity: 0.6;">+{{ record.finger.length - 3 }}</span>
+              </div>
+
+              <!-- 资产标签行 -->
+              <div class="gallery-tag-row">
+                <template v-for="(t, idx) in getRecordTags(record)" :key="idx">
+                  <a-tag closable color="orange" style="margin: 0 4px 4px 0; font-size: 11px;" @close.prevent="handleRemoveTag(record, t)">{{ t }}</a-tag>
+                </template>
+                <template v-for="t in DEFAULT_TAGS" :key="'gquick-' + t">
+                  <span v-if="!hasTag(record, t)" class="quick-tag-btn" @click.stop="toggleTag(record, t)" :title="`一键打标：${t}`">+ {{ t }}</span>
+                </template>
+                <a-popover v-model:open="record._tagPopoverVisible" trigger="click" placement="topLeft" :overlayStyle="{ width: '280px' }">
+                  <template #content>
+                    <div style="padding: 2px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 13px; color: var(--arl-text-color);">常用快捷标签：</span>
+                        <span v-if="commonTags.length !== DEFAULT_TAGS.length || !DEFAULT_TAGS.every(t => commonTags.includes(t))" @click="resetDefaultTags" style="font-size: 11px; color: #ff7875; cursor: pointer;">恢复默认</span>
+                      </div>
+                      <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+                        <a-tag v-for="t in commonTags" :key="t" :color="hasTag(record, t) ? 'orange' : 'default'" style="cursor: pointer; padding: 2px 8px; font-size: 12px; border-radius: 4px; user-select: none; display: inline-flex; align-items: center;" @click="toggleTag(record, t)">
+                          <check-outlined v-if="hasTag(record, t)" style="margin-right: 4px; font-size: 11px;" />
+                          {{ t }}
+                          <close-outlined v-if="!DEFAULT_TAGS.includes(t)" style="font-size: 9px; margin-left: 6px; color: #999; cursor: pointer;" title="从常用列表删除" @click.stop="deleteCommonTag(t)" />
+                        </a-tag>
+                      </div>
+                      <div style="border-top: 1px solid var(--arl-border-color); padding-top: 8px;">
+                        <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.7; margin-bottom: 6px;">自定义新标签：</div>
+                        <div style="display: flex; gap: 6px;">
+                          <a-input v-model:value="record._newTagInput" placeholder="新标签名称" size="small" style="flex: 1;" allowClear @pressEnter="handleAddNewCustomTag(record)" />
+                          <a-button type="primary" size="small" @click="handleAddNewCustomTag(record)">添加</a-button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <span class="add-tag" style="cursor: pointer; user-select: none;"><plus-outlined style="font-size: 10px; margin-right: 3px;" />标签</span>
+                </a-popover>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else style="padding: 60px 0; text-align: center; color: var(--arl-text-color); opacity: 0.6;">
+          <picture-outlined style="font-size: 40px; margin-bottom: 12px;" />
+          <div>暂无站点数据</div>
+        </div>
+      </a-spin>
+    </div>
+
     <!-- 综合C段详情弹窗 -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
@@ -1019,13 +1131,32 @@ import { ref, computed, onMounted, reactive, watch, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
-import { SearchOutlined, CheckOutlined, PlusOutlined, CloseOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, CheckOutlined, PlusOutlined, CloseOutlined, PictureOutlined, ZoomInOutlined } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 
 const route = useRoute();
 const activeTab = ref('site');
 const loading = ref(false);
 const dataSource = ref([]);
+
+// 站点截图画廊与存活截图筛选
+const onlyScreenshot = ref(false);
+const siteViewMode = ref('table');
+
+const toggleOnlyScreenshot = () => {
+  onlyScreenshot.value = !onlyScreenshot.value;
+  pagination.current = 1;
+  fetchData();
+};
+
+const getStatusBadgeClass = (code) => {
+  const num = parseInt(code, 10);
+  if (num >= 200 && num < 300) return 'status-2xx';
+  if (num >= 300 && num < 400) return 'status-3xx';
+  if (num >= 400 && num < 500) return 'status-4xx';
+  if (num >= 500 && num < 600) return 'status-5xx';
+  return 'status-other';
+};
 
 // 任务筛选管理
 const selectedTaskIds = ref([]);
@@ -1514,6 +1645,11 @@ const fetchData = async () => {
       params.task_id = selectedTaskIds.value.join(',');
     }
 
+    // 仅看有截图联动 (站点 Tab)
+    if (activeTab.value === 'site' && onlyScreenshot.value) {
+      params.has_screenshot = 'true';
+    }
+
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
       params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
@@ -1556,6 +1692,10 @@ const handleExport = async () => {
       params.task_id = selectedTaskIds.value.join(',');
     }
 
+    if (activeTab.value === 'site' && onlyScreenshot.value) {
+      params.has_screenshot = 'true';
+    }
+
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       params.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
       params.update_date__dlt = typeof dateRange.value[1] === 'string' ? dateRange.value[1] : (dateRange.value[1].format ? dateRange.value[1].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[1]));
@@ -1596,6 +1736,7 @@ const resetSearch = () => {
   selectedTaskIds.value = [];
   dateRange.value = null;
   quickDay.value = null;
+  onlyScreenshot.value = false;
   onSearch();
 };
 const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
@@ -1606,6 +1747,8 @@ watch(activeTab, (newVal) => {
     searchForm.value = {};
     dateRange.value = null;
     quickDay.value = null;
+    onlyScreenshot.value = false;
+    siteViewMode.value = 'table';
     pagination.current = 1;
     fetchData();
   }
@@ -1657,6 +1800,9 @@ const openRiskModal = async () => {
     const setParams = { ...searchForm.value };
     if (selectedTaskIds.value && selectedTaskIds.value.length > 0) {
       setParams.task_id = selectedTaskIds.value.join(',');
+    }
+    if (activeTab.value === 'site' && onlyScreenshot.value) {
+      setParams.has_screenshot = 'true';
     }
     if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2 && dateRange.value[0] && dateRange.value[1]) {
       setParams.update_date__dgt = typeof dateRange.value[0] === 'string' ? dateRange.value[0] : (dateRange.value[0].format ? dateRange.value[0].format('YYYY-MM-DD HH:mm:ss') : String(dateRange.value[0]));
@@ -1894,5 +2040,135 @@ const handleQuickTagFilter = (tag) => {
   background: #fff2e8;
   color: #ff7a45;
   border-color: #ffbb96;
+}
+
+/* 截图画廊视图样式 */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 16px;
+  padding: 8px 0;
+}
+.gallery-card {
+  border: 1px solid var(--arl-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--arl-bg-white);
+  transition: all 0.25s ease-in-out;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.gallery-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  border-color: #1890ff;
+}
+.gallery-cover {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  background: #f0f2f5;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gallery-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  transition: transform 0.3s ease;
+}
+.gallery-card:hover .gallery-img {
+  transform: scale(1.03);
+}
+.gallery-no-img {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--arl-text-color);
+  opacity: 0.5;
+  font-size: 13px;
+}
+.gallery-zoom-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.gallery-cover:hover .gallery-zoom-overlay {
+  opacity: 1;
+}
+.gallery-status-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.status-2xx { background-color: #52c41a; }
+.status-3xx { background-color: #1890ff; }
+.status-4xx { background-color: #faad14; }
+.status-5xx { background-color: #f5222d; }
+.status-other { background-color: #8c8c8c; }
+
+.gallery-info {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.gallery-site-title {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.gallery-url {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.gallery-title-text {
+  font-size: 12px;
+  color: var(--arl-text-color);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gallery-finger-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.gallery-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 4px;
+  border-top: 1px dashed var(--arl-border-color);
 }
 </style>

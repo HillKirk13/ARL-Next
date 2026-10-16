@@ -51,6 +51,7 @@ base_search_task_fields = {
     'options.findvhost': fields.Boolean(description="是否开启Host碰撞检测"),
     'options.web_info_hunter': fields.Boolean(description="是否开启 webInfoHunter"),
     'options.npoc_service_detection': fields.Boolean(description="是否开启服务(python)识别"),
+    'options.multi_level_subdomain': fields.Boolean(description="是否开启多级子域名收集"),
 
     # 翻译官(build_db_query)”,这里的后缀就是给它看的！
     'statistic.site_cnt': fields.Integer(description="站点数量等于"),
@@ -105,6 +106,7 @@ add_task_fields = ns.model('AddTask', { # 创建添加任务命名空间。
     "findvhost": fields.Boolean(example=False, default=False),
     "web_info_hunter": fields.Boolean(example=False, default=False, description="WEB JS 中的信息收集"),
     "npoc_service_detection": fields.Boolean(example=False, default=False, description="服务(python)识别"),
+    "multi_level_subdomain": fields.Boolean(example=False, default=False, description="多级子域名收集"),
 })
 
 
