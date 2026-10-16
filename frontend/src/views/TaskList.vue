@@ -250,10 +250,11 @@
 
       <a-form-item :wrapper-col="{ offset: 3, span: 21 }" style="margin-top: 16px; margin-bottom: 0;">
         <!-- 任务快捷扫描模式预设 -->
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; background: rgba(24, 144, 255, 0.05); border: 1px dashed #1890ff; border-radius: 6px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; background: rgba(24, 144, 255, 0.05); border: 1px dashed #1890ff; border-radius: 6px; flex-wrap: wrap; gap: 8px;">
           <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">⚡️ 快捷扫描策略预设：</span>
-          <a-space size="small">
-            <a-button size="small" type="primary" ghost @click="applyQuickScreenshotMode">📷 仅存活探测与截图</a-button>
+          <a-space size="small" wrap>
+            <a-button size="small" type="primary" ghost @click="applyTargetOnlyScreenshotMode">📷 仅目标探活与截图</a-button>
+            <a-button size="small" @click="applySubdomainScreenshotMode">🔍 多级子域收集+截图</a-button>
             <a-button size="small" @click="applyFullReconMode">🌐 全面深度侦查</a-button>
           </a-space>
         </div>
@@ -758,21 +759,25 @@ const formState = reactive({
   ...defaultPlugins
 });
 
-// ⚡️ 快捷扫描策略预设：仅存活探测与截图
-const applyQuickScreenshotMode = () => {
-  formState.domain_brute = true;
-  formState.multi_level_subdomain = true;
-  formState.alt_dns = true;
-  formState.dns_query_plugin = true;
-  formState.arl_search = true;
-  formState.site_identify = true;
-  formState.site_capture = true;
-  formState.skip_scan_cdn_ip = true;
+// ⚡️ 快捷扫描策略预设 1：仅目标探活与截图 (极速模式：不跑任何子域名爆破与端口扫描，只对输入框内的目标探活与截图)
+const applyTargetOnlyScreenshotMode = () => {
+  // 基础资产侦查全部关闭（不跑爆破、不跑DNS智能生成、不跑插件）
+  formState.domain_brute = false;
+  formState.alt_dns = false;
+  formState.dns_query_plugin = false;
+  formState.arl_search = false;
+  formState.multi_level_subdomain = false;
 
+  // 端口与服务发现全部关闭
   formState.port_scan = false;
   formState.service_detection = false;
   formState.os_detection = false;
   formState.ssl_cert = false;
+  formState.skip_scan_cdn_ip = true;
+
+  // Web 深度探测只保留站点识别与截图
+  formState.site_identify = true;
+  formState.site_capture = true;
   formState.search_engines = false;
   formState.site_spider = false;
   formState.file_leak = false;
@@ -781,7 +786,34 @@ const applyQuickScreenshotMode = () => {
   formState.web_info_hunter = false;
   formState.npoc_service_detection = false;
 
-  message.success('已切换为【⚡️ 仅存活探测与截图】极速模式');
+  message.success('已切换为【📷 仅目标探活与截图】极速模式（关闭所有域名爆破与端口扫描）');
+};
+
+// ⚡️ 快捷扫描策略预设 2：多级子域收集+截图 (仅跑新工具链深度子域挖掘，不跑2万大字典爆破，直接探活截图)
+const applySubdomainScreenshotMode = () => {
+  formState.domain_brute = false;
+  formState.alt_dns = false;
+  formState.dns_query_plugin = false;
+  formState.arl_search = false;
+  formState.multi_level_subdomain = true; // 仅开启多级子域名收集
+
+  formState.port_scan = false;
+  formState.service_detection = false;
+  formState.os_detection = false;
+  formState.ssl_cert = false;
+  formState.skip_scan_cdn_ip = true;
+
+  formState.site_identify = true;
+  formState.site_capture = true;
+  formState.search_engines = false;
+  formState.site_spider = false;
+  formState.file_leak = false;
+  formState.findvhost = false;
+  formState.nuclei_scan = false;
+  formState.web_info_hunter = false;
+  formState.npoc_service_detection = false;
+
+  message.success('已切换为【🔍 多级子域收集+截图】模式');
 };
 
 // 🌐 快捷扫描策略预设：全面深度侦查
